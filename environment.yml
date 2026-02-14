@@ -1,0 +1,15 @@
+name: face_recog
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.24
+  - pyyaml>=6.0
+  - pydantic>=2.0
+  - requests>=2.31
+  - opencv>=4.8
+  - pip:
+      - insightface>=0.7
+      - onnxruntime>=1.16

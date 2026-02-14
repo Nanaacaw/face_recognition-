@@ -1,0 +1,221 @@
+# face_recog — Configuration Reference
+
+Semua konfigurasi sistem dibaca dari:
+
+configs/app.<env>.yaml
+
+Environment:
+- dev
+- staging
+- prod
+
+Secrets (Telegram) harus dibaca dari environment variables.
+
+---
+
+# 1) camera
+
+## camera.source
+Type: string  
+Allowed: "webcam" | "rtsp"  
+Description:
+Menentukan sumber video.
+
+---
+
+## camera.webcam_index
+Type: int  
+Default: 0  
+Used when: source = webcam  
+Description:
+Index device webcam pada sistem Windows.
+
+---
+
+## camera.rtsp_url
+Type: string  
+Used when: source = rtsp  
+Description:
+RTSP URL stream kamera.
+
+---
+
+## camera.process_fps
+Type: int  
+Recommended: 3–5  
+Description:
+Berapa fps diproses untuk recognition.
+Frame lain boleh di-drop untuk menjaga performa.
+
+Impact:
+- Terlalu tinggi → CPU naik
+- Terlalu rendah → detection delay
+
+---
+
+## camera.preview
+Type: boolean  
+Description:
+Jika true, tampilkan OpenCV preview window.
+Biasanya true di dev, false di prod.
+
+---
+
+# 2) recognition
+
+## recognition.threshold
+Type: float (0.0–1.0)  
+Typical: 0.40–0.55  
+
+Description:
+Minimum similarity agar dianggap match.
+
+Lower value:
+- Lebih toleran
+- Risiko false positive naik
+
+Higher value:
+- Lebih ketat
+- Risiko false negative naik
+
+Must be tuned in staging.
+
+---
+
+## recognition.min_consecutive_hits
+Type: int  
+Recommended: 2–3  
+
+Description:
+Jumlah hit berturut-turut sebelum dianggap valid SPG_SEEN.
+
+Purpose:
+Mengurangi noise dan false detection satu frame.
+
+---
+
+# 3) presence
+
+## presence.grace_seconds
+Type: int  
+Recommended: 15–30  
+
+Description:
+Toleransi waktu hilang sementara (misalnya tertutup orang).
+
+Jika SPG tidak terlihat kurang dari waktu ini,
+status tetap dianggap PRESENT.
+
+---
+
+## presence.absent_seconds
+Type: int  
+Default: 300 (5 menit)  
+
+Description:
+Batas waktu tidak terlihat sebelum alert dikirim.
+
+If:
+now - last_seen > absent_seconds
+→ ABSENT_ALERT_FIRED
+
+---
+
+# 4) storage
+
+## storage.data_dir
+Type: string  
+Default: "./data"  
+
+Description:
+Root folder untuk:
+- gallery
+- snapshots
+- events.jsonl
+
+---
+
+## storage.snapshot_enabled
+Type: boolean  
+Description:
+Jika true, sistem menyimpan snapshot saat alert.
+
+---
+
+## storage.snapshot_retention_days
+Type: int  
+Recommended:
+- dev: 3–7
+- prod: 7–30
+
+Description:
+Berapa hari snapshot disimpan sebelum dihapus.
+
+---
+
+# 5) target
+
+## target.spg_ids
+Type: list[string]  
+
+Description:
+Daftar SPG yang dimonitor.
+
+MVP:
+Biasanya hanya 1 SPG per kamera.
+
+Future:
+Bisa multi-SPG.
+
+---
+
+## target.outlet_id
+Type: string  
+Description:
+Identifier outlet.
+
+Dicatat di event log dan Telegram.
+
+---
+
+## target.camera_id
+Type: string  
+Description:
+Identifier kamera.
+
+Dicatat di event log dan Telegram.
+
+---
+
+# 6) Environment Variables (Secrets)
+
+Must exist in system environment:
+
+- TELEGRAM_BOT_TOKEN
+- TELEGRAM_CHAT_ID
+- APP_ENV (dev/staging/prod)
+
+These must NEVER be committed to Git.
+
+---
+
+# 7) Config Philosophy
+
+Rules:
+- Semua parameter yang mungkin berubah harus ada di config.
+- Tidak boleh hardcode threshold di source code.
+- Tidak boleh conditional logic berdasarkan ENV di kode.
+- Perbedaan behavior harus berasal dari config file.
+
+---
+
+# 8) Tuning Strategy
+
+Tuning order:
+
+1. Adjust recognition.threshold
+2. Adjust min_consecutive_hits
+3. Adjust grace_seconds
+4. Adjust process_fps
+
+Never tune everything at once.
