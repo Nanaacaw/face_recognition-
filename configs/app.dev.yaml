@@ -1,0 +1,23 @@
+camera:
+  source: webcam
+  webcam_index: 0
+  process_fps: 5
+  preview: true
+
+recognition:
+  threshold: 0.30
+  min_consecutive_hits: 2
+
+presence:
+  grace_seconds: 20
+  absent_seconds: 300
+
+storage:
+  data_dir: "./data"
+  snapshot_enabled: true
+  snapshot_retention_days: 14
+
+target:
+  spg_ids: ["001"]
+  outlet_id: "OUTLET_DEV"
+  camera_id: "CAM_DEV_01"

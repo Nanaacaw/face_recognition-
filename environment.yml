@@ -12,4 +12,5 @@ dependencies:
   - opencv>=4.8
   - pip:
       - insightface>=0.7
-      - onnxruntime>=1.16
+      - onnxruntime-gpu>=1.16
+      - python-dotenv>=1.0
