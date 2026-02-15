@@ -1,16 +1,19 @@
 camera:
-  source: webcam
-  webcam_index: 0
-  process_fps: 5
-  preview: true
+  # source: webcam
+  # webcam_index: 0
+  # process_fps: 5
+  # preview: true
+
+  source: rtsp
+  rtsp_url: ""
 
 recognition:
   threshold: 0.30
   min_consecutive_hits: 2
 
 presence:
-  grace_seconds: 20
-  absent_seconds: 300
+  grace_seconds: 3 # for testing, default: 20 sec
+  absent_seconds: 10 # for testing, default 300 sec (5 menit)
 
 storage:
   data_dir: "./data"
