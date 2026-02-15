@@ -42,16 +42,18 @@ class AppConfig(BaseModel):
     storage: StorageConfig
     target: TargetConfig
 
-def load_settings() -> AppConfig:
+def load_settings(config_path: str | None = None) -> AppConfig:
     load_dotenv()
+    
+    if config_path is None:
+        env = os.getenv("APP_ENV", "dev")
+        config_path = f"configs/app.{env}.yaml"
 
-    env = os.getenv("APP_ENV", "dev")
-    config_path = Path("configs") / f"app.{env}.yaml"
+    path = Path(config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Config not found: {path}")
 
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
 
-    with open(config_path, "r") as f:
-        raw_config = yaml.safe_load(f)
-
-    return AppConfig(**raw_config)
+    return AppConfig.model_validate(raw)
