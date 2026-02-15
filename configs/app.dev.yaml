@@ -1,16 +1,17 @@
 camera:
-  source: webcam
-  webcam_index: 0
+  source: webcam # webcam | rtsp
+  webcam_index: 0 # 0 | null
+  rtsp_url: null # null | rtsp_url
   process_fps: 5
-  preview: true
+  preview: true # true | false
 
 recognition:
   threshold: 0.30
   min_consecutive_hits: 2
 
 presence:
-  grace_seconds: 20
-  absent_seconds: 300
+  grace_seconds: 3 # for testing, default: 20 sec
+  absent_seconds: 10 # for testing, default 300 sec (5 menit)
 
 storage:
   data_dir: "./data"
@@ -18,6 +19,6 @@ storage:
   snapshot_retention_days: 14
 
 target:
-  spg_ids: ["001"]
+  spg_ids: ["001","002","003","004","005","006","007"]
   outlet_id: "OUTLET_DEV"
-  camera_id: "CAM_DEV_01"
+  camera_id: "CAM01"

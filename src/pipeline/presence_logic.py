@@ -8,9 +8,11 @@ from src.domain.events import Event
 
 @dataclass
 class SpgState:
-    state: str = "UNKNOWN" # Ada unknown, present, absent
-    last_seen_ts: Optional[float] = None
-    alert_active: bool = False
+    def __init__(self):
+        self.state: str = "UNKNOWN"
+        self.last_seen_ts: Optional[float] = None
+        self.alert_active: bool = False
+        self.last_name: Optional[str] = None
 
 class PresenceEngine:
     def __init__(
@@ -45,6 +47,7 @@ class PresenceEngine:
         events: list[Event] = []
 
         s.last_seen_ts = now
+        s.last_name = name
 
         events.append(
             Event(
@@ -117,6 +120,7 @@ class PresenceEngine:
                         outlet_id=self.outlet_id,
                         camera_id=self.camera_id,
                         spg_id=spg_id,
+                        name=s.last_name,
                         details={"seconds_since_last_seen": int(dt)},
                     )
                 )

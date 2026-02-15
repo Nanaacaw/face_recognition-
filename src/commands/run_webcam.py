@@ -9,7 +9,8 @@ from src.pipeline.face_detector import FaceDetector
 from src.storage.gallery_store import GalleryStore
 from src.pipeline.matcher import Matcher
 from src.pipeline.presence_logic import PresenceEngine
-
+from src.notification.telegram_notifier import TelegramNotifier
+from src.pipeline.rtsp_reader import RTSPReader
 
 def run_webcam_recognition(
     data_dir: str,
@@ -21,12 +22,22 @@ def run_webcam_recognition(
     outlet_id: str,
     camera_id: str,
     target_spg_ids: list[str],
+    camera_source: str = "webcam",
+    rtsp_url: str | None = None,
+    preview: bool = True,
 ):
     store = GalleryStore(data_dir)
     gallery = store.load_all()
 
     event_store = EventStore(data_dir)
     snapshot_store = SnapshotStore(data_dir)
+
+    notifier = None
+    try:
+        notifier = TelegramNotifier.from_env()
+    except Exception as e:
+        print("[WARN] Telegram notifier disabled:", e)
+
     matcher = Matcher(threshold=threshold)
     matcher.load_gallery(gallery)
 
@@ -37,17 +48,45 @@ def run_webcam_recognition(
         absent_seconds=absent_seconds,
     )
 
-    reader = WebcamReader(webcam_index, process_fps)
+
+    if camera_source == "webcam":
+        reader = WebcamReader(webcam_index, process_fps)
+    elif camera_source == "rtsp":
+        if not rtsp_url:
+            raise ValueError("rtsp_url must be provided for RTSP source")
+        reader = RTSPReader(rtsp_url, process_fps)
+    else:
+        raise ValueError(f"Unknown camera source: {camera_source}")
+
     detector = FaceDetector(det_size=(640, 640))
 
-    def handle_event(e, frame_for_snapshot=None):
-        if e.event_type == "ABSENT_ALERT_FIRED" and frame_for_snapshot is not None:
+    def handle_event(event, frame_for_snapshot=None):
+        if event.event_type == "ABSENT_ALERT_FIRED" and frame_for_snapshot is not None:
             snap_path = snapshot_store.save_alert_frame(outlet_id, camera_id, frame_for_snapshot)
-            e.details = dict(e.details or {})
-            e.details["snapshot_path"] = snap_path
+            event.details = dict(event.details or {})
+            event.details["snapshot_path"] = snap_path
 
-        event_store.append(e)
-        print("[EVENT]", e.model_dump())
+        event_store.append(event)
+        print("[EVENT]", event.model_dump())
+
+        if notifier is not None and event.event_type == "ABSENT_ALERT_FIRED":
+            seconds = event.details.get("seconds_since_last_seen")
+            text = (
+                f"⚠️ SPG ABSENT ALERT\n"
+                f"Outlet: {event.outlet_id}\n"
+                f"Camera: {event.camera_id}\n"
+                f"SPG: {event.name or event.spg_id}\n"
+                f"Last seen: {seconds}s ago"
+            )
+
+            snap = event.details.get("snapshot_path")
+            try:
+                if snap:
+                    notifier.send_photo(snap, caption=text)
+                else:
+                    notifier.send_message(text)
+            except Exception as ex:
+                print("[ERROR] Failed to send Telegram alert:", ex)
 
     detector.start()
     reader.start()
@@ -59,52 +98,46 @@ def run_webcam_recognition(
     try:
         while True:
             frame = reader.read_throttled()
+            now = time.time()
 
             if frame is not None:
                 faces = detector.detect(frame)
 
-                # pick best face (highest det_score)
-                best = None
-                best_score = -1.0
+                seen_this_frame = set()
 
                 for f in faces:
-                    score = float(getattr(f, "det_score", 0.0))
-                    if score > best_score:
-                        best_score = score
-                        best = f
-                
-                now = time.time()
-
-                if best is not None:
-                    x1, y1, x2, y2 = [int(v) for v in best.bbox]
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-                    emb = getattr(best, "embedding", None)
+                    emb = getattr(f, "embedding", None)
                     matched, spg_id, name, sim = matcher.match(emb)
 
-                    if matched and spg_id in target_spg_ids:
-                        for e in engine.observe_seen(
-                            spg_id = spg_id,
-                            name = name,
-                            similarity = sim,
-                            ts = now
-                        ):
-                            handle_event(e)
+                    if not matched:
+                        continue
+                    if spg_id not in target_spg_ids:
+                        continue
+                    if spg_id in seen_this_frame:
+                        continue
 
-                    if matched:
-                        label = f"{name} ({sim:.2f})"
-                        color = (0, 255, 0)
-                    else:
-                        label = f"UNKNOWN ({sim:.2f})"
-                        color = (0, 0, 255)
-                                         
+                    seen_this_frame.add(spg_id)
+
+                    for e in engine.observe_seen(
+                        spg_id=spg_id,
+                        name=name,
+                        similarity=sim,
+                        ts=now,
+                    ):
+                        handle_event(e)
+
+                    # draw bbox
+                    x1, y1, x2, y2 = [int(v) for v in f.bbox]
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+                    label = f"{name} ({sim:.2f})"
                     cv2.putText(
                         frame,
                         label,
                         (x1, max(0, y1 - 10)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
-                        color,
+                        (0, 255, 0),
                         2,
                     )
 
@@ -114,7 +147,8 @@ def run_webcam_recognition(
                     else:
                         handle_event(e)
 
-                cv2.imshow("face_recog | run", frame)
+                if preview:
+                    cv2.imshow(f"face_recog | {camera_id}", frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):

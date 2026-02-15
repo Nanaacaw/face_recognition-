@@ -134,6 +134,16 @@ Anti-spam:
 - Alert baru boleh terjadi lagi setelah SPG kembali PRESENT (hit valid).
 
 ---
+### 7.1 Multi-Camera Presence (Outlet Level)
+Pada sistem multi-kamera:
+- Presence tidak lagi dihitung per kamera.
+- Presence dihitung di level outlet.
+
+Definitions:
+- last_seen_cam_i: timestamp terakhir SPG terlihat di kamera i
+- last_seen_global: maksimum dari seluruh kamera
+Alert hanya boleh dipicu berdasarkan last_seen_global.
+Worker kamera tidak boleh mengirim alert.
 
 ## 8) Evidence (Snapshot Policy)
 Pada `ABSENT_ALERT_FIRED`:
