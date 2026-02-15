@@ -19,6 +19,7 @@ env/
 .env.*
 !.env.example
 data/
+data_*/
 .vscode/
 .idea/
 .DS_Store
