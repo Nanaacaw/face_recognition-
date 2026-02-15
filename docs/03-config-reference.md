@@ -219,3 +219,13 @@ Tuning order:
 4. Adjust process_fps
 
 Never tune everything at once.
+
+# 9) Multi-Camera Deployment Strategy
+Per camera:
+configs/mkg_cam01.yaml
+configs/mkg_cam02.yaml
+...
+
+Per outlet aggregator dijalankan dengan:
+aggregate --data_dirs data_cam01 data_cam02 ...
+(Jumlah kamera fleksibel (2–5+))

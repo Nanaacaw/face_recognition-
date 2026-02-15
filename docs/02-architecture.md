@@ -184,3 +184,71 @@ Behavior difference must come from config.
 - GPU acceleration
 
 Architecture must allow these without rewrite.
+
+## 7) Multi-Camera Outlet Architecture (v2)
+### 7.1 Motivation
+Dalam satu outlet dapat terdapat lebih dari satu kamera (2–5 CCTV).
+SPG dianggap PRESENT jika terdeteksi pada salah satu kamera (ANY-of-N rule).
+
+Sistem harus mendukung:
+- Jumlah kamera berbeda per outlet
+- Multi-SPG per outlet
+- Alert hanya 1x per SPG per outlet
+
+### 7.2 Updated High-Level Flow
+Per Outlet
+Worker (Camera 01)  ┐
+Worker (Camera 02)  ├──> OutletAggregator
+Worker (Camera 03)  │        ↓
+Worker (Camera 04)  ┘    PresenceEngine (Global)
+                            ↓
+                        EventDispatcher
+                            ↓
+                        TelegramNotifier
+
+### 7.3 Camera Worker Responsibilities
+
+Worker (per camera) bertugas:
+- Capture frame (webcam / RTSP)
+- Detect face
+- Extract embedding
+- Match to gallery
+- Emit SPG_SEEN events
+
+Write events to:
+- data_camXX/events.jsonl
+
+Worker MUST NOT:
+- Fire ABSENT alert
+- Send Telegram alert
+- Decide global presence
+
+### 7.4 Outlet Aggregator Responsibilities
+Aggregator (per outlet):
+- Read events from all camera workers
+Compute:
+- last_seen_global(spg) = max(last_seen_cam_i(spg))
+
+Apply absence rule:
+- if now - last_seen_global > absent_seconds
+- emit ABSENT_ALERT_FIRED
+- send Telegram
+
+### 7.5 ANY-of-N Rule
+SPG dianggap PRESENT jika:
+now - max(last_seen_cam_i) <= absent_seconds
+
+SPG dianggap ABSENT hanya jika:
+- Tidak terlihat di seluruh kamera
+- Melebihi absent_seconds
+
+### 7.6 Deployment Model
+Per outlet:
+- 1 process per camera
+- 1 process aggregator
+Ex: 
+python run cam01
+python run cam02
+python run cam03
+python run cam04
+python aggregate outlet_mkg
