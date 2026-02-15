@@ -1,11 +1,9 @@
 camera:
-  # source: webcam
-  # webcam_index: 0
-  # process_fps: 5
-  # preview: true
-
-  source: rtsp
-  rtsp_url: ""
+  source: webcam # webcam | rtsp
+  webcam_index: 0 # 0 | null
+  rtsp_url: null # null | rtsp_url
+  process_fps: 5
+  preview: true # true | false
 
 recognition:
   threshold: 0.30
@@ -21,6 +19,6 @@ storage:
   snapshot_retention_days: 14
 
 target:
-  spg_ids: ["001"]
+  spg_ids: ["001","002","003","004","005","006","007"]
   outlet_id: "OUTLET_DEV"
-  camera_id: "CAM_DEV_01"
+  camera_id: "CAM01"

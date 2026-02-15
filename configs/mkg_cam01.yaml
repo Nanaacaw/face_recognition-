@@ -1,0 +1,24 @@
+camera:
+  source: rtsp
+  webcam_index: null
+  rtsp_url: "rtsp://admin:Admin123@172.168.0.64:554/Streaming/Channels/101"
+  process_fps: 5
+  preview: false
+
+recognition:
+  threshold: 0.45
+  min_consecutive_hits: 2
+
+presence:
+  grace_seconds: 20
+  absent_seconds: 300
+
+storage:
+  data_dir: "./data_mkg_cam01"
+  snapshot_enabled: true
+  snapshot_retention_days: 14
+
+target:
+  spg_ids: ["001","002","003","004","005","006","007"]
+  outlet_id: "MKG"
+  camera_id: "CAM01"

@@ -22,3 +22,6 @@ enroll:
 
 debug:
 	python -m src.app debug
+
+test-mkg:
+	python -m src.app run --config configs/mkg_cam01.yaml
