@@ -9,7 +9,7 @@ from src.pipeline.face_detector import FaceDetector
 from src.storage.gallery_store import GalleryStore
 from src.pipeline.matcher import Matcher
 from src.pipeline.presence_logic import PresenceEngine
-
+from src.notification.telegram_notifier import TelegramNotifier
 
 def run_webcam_recognition(
     data_dir: str,
@@ -27,6 +27,13 @@ def run_webcam_recognition(
 
     event_store = EventStore(data_dir)
     snapshot_store = SnapshotStore(data_dir)
+
+    notifier = None
+    try:
+        notifier = TelegramNotifier.from_env()
+    except Exception as e:
+        print("[WARN] Telegram notifier disabled:", e)
+
     matcher = Matcher(threshold=threshold)
     matcher.load_gallery(gallery)
 
@@ -40,7 +47,7 @@ def run_webcam_recognition(
     reader = WebcamReader(webcam_index, process_fps)
     detector = FaceDetector(det_size=(640, 640))
 
-    def handle_event(e, frame_for_snapshot=None):
+    def handle_event(event, frame_for_snapshot=None):
         if e.event_type == "ABSENT_ALERT_FIRED" and frame_for_snapshot is not None:
             snap_path = snapshot_store.save_alert_frame(outlet_id, camera_id, frame_for_snapshot)
             e.details = dict(e.details or {})
@@ -48,6 +55,25 @@ def run_webcam_recognition(
 
         event_store.append(e)
         print("[EVENT]", e.model_dump())
+
+        if notifier is not None and event.event_type == "ABSENT_ALERT_FIRED":
+            seconds = event.details.get("seconds_since_last_seen")
+            text = (
+                f"⚠️ SPG ABSENT ALERT\n"
+                f"Outlet: {event.outlet_id}\n"
+                f"Camera: {event.camera_id}\n"
+                f"SPG: {event.name or event.spg_id}\n"
+                f"Last seen: {seconds}s ago"
+            )
+
+            snap = event.details.get("snapshot_path")
+            try:
+                if snap:
+                    notifier.send_photo(snap, caption=text)
+                else:
+                    notifier.send_message(text)
+            except Exception as ex:
+                print("[ERROR] Failed to send Telegram alert:", ex)
 
     detector.start()
     reader.start()
