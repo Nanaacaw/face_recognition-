@@ -96,6 +96,11 @@ def main():
             webcam_index=cfg.camera.webcam_index or 0,
             process_fps=cfg.camera.process_fps,
             threshold=cfg.recognition.threshold,
+            grace_seconds=cfg.presence.grace_seconds,
+            absent_seconds=cfg.presence.absent_seconds,
+            outlet_id=cfg.target.outlet_id,
+            camera_id=cfg.target.camera_id,
+            target_spg_ids=cfg.target.spg_ids,
         )
 
     elif args.command == "enroll":
