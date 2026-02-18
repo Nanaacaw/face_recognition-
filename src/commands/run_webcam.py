@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import time
+import os
 
 from src.storage.event_store import EventStore
 from src.storage.snapshot_store import SnapshotStore
@@ -100,8 +101,10 @@ def run_webcam_recognition(
     print("[RUN] Webcam recognition started. Press 'q' to quit.")
     print(f"[RUN] Gallery loaded: {list(gallery.keys())}  threshold={threshold}")
 
-
     last_snapshot_times = {}
+    last_frame_time = 0
+    # Path for latest camera frame (for dashboard preview)
+    frame_path = os.path.join(data_dir, "snapshots", "latest_frame.jpg")
 
     try:
         while True:
@@ -155,11 +158,24 @@ def run_webcam_recognition(
                         2,
                     )
 
-                for e in engine.tick(target_spg_ids=target_spg_ids, ts=now):
-                    if e.event_type == "ABSENT_ALERT_FIRED":
-                        handle_event(e, frame_for_snapshot=frame)
-                    else:
-                        handle_event(e)
+                # Save latest camera frame for dashboard preview (1x per second)
+                if now - last_frame_time > 1.0:
+                    try:
+                        h, w = frame.shape[:2]
+                        small = cv2.resize(frame, (640, int(h * 640 / w)))
+                        cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        last_frame_time = now
+                    except Exception:
+                        pass
+
+                # Only run local absence checks if NOT in multi-camera worker mode.
+                # In multi-camera mode, the global OutletAggregator handles absence detection.
+                if enable_notifier:
+                    for e in engine.tick(target_spg_ids=target_spg_ids, ts=now):
+                        if e.event_type == "ABSENT_ALERT_FIRED":
+                            handle_event(e, frame_for_snapshot=frame)
+                        else:
+                            handle_event(e)
 
                 if preview:
                     cv2.imshow(f"face_recog | {camera_id}", frame)

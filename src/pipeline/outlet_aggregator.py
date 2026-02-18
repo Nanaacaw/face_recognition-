@@ -1,6 +1,6 @@
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from src.domain.events import Event
 
 class OutletAggregator:
@@ -110,3 +110,67 @@ class OutletAggregator:
                     generated_events.append(evt)
         
         return generated_events
+
+    def get_state(self) -> Dict[str, Any]:
+        """
+        Return current state of all tracked SPGs.
+        """
+        now = time.time()
+        state = {
+            "outlet_id": self.outlet_id,
+            "timestamp": now,
+            "spgs": []
+        }
+        
+        for spg_id in self.target_spg_ids:
+            last_ts = self.last_seen[spg_id]
+            is_absent = self.is_absent[spg_id]
+            # Determine status
+            status = "PRESENT"
+            if last_ts == 0:
+                # Check if absent period passed since startup
+                if (now - self.start_time) > self.absent_seconds:
+                    status = "NEVER_ARRIVED"
+                else:
+                    status = "NOT_SEEN_YET"
+            elif is_absent:
+                status = "ABSENT"
+            
+            # Duration calculation
+            if last_ts == 0:
+                duration = int(now - self.start_time)
+            else:
+                duration = int(now - last_ts)
+
+            spg_data = {
+                "id": spg_id,
+                "name": self.spg_names.get(spg_id, "Unknown"),
+                "status": status,
+                "last_seen_ts": last_ts,
+                "seconds_since_last_event": duration,
+                "is_alert_fired": self.alert_fired[spg_id]
+            }
+            state["spgs"].append(spg_data)
+            
+        return state
+
+    def dump_state(self, filepath: str):
+        """
+        Write current state to a JSON file (Windows-safe).
+        """
+        import json
+        
+        state = self.get_state()
+        
+        # Direct write (Windows-safe, avoids os.replace lock issues)
+        for attempt in range(3):
+            try:
+                with open(filepath, 'w') as f:
+                    json.dump(state, f, indent=2)
+                return  # Success
+            except PermissionError:
+                # File might be locked by dashboard reader, retry after short wait
+                time.sleep(0.05)
+        
+        # If all retries fail, silently skip this tick
+        # (dashboard will just show slightly stale data)

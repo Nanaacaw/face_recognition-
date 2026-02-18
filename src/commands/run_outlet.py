@@ -2,12 +2,8 @@ import multiprocessing
 import time
 import os
 import json
-import signal
-from typing import List
+import sys
 
-from src.commands.run_webcam import run_webcam_recognition
-from src.pipeline.outlet_aggregator import OutletAggregator
-from src.domain.events import Event
 from src.commands.run_webcam import run_webcam_recognition
 from src.pipeline.outlet_aggregator import OutletAggregator
 from src.domain.events import Event
@@ -15,11 +11,13 @@ from src.notification.telegram_notifier import TelegramNotifier
 from src.settings.settings import load_settings
 from dotenv import load_dotenv
 
-def worker_camera_process(config_common, camera_id, video_path, data_dir):
+
+def worker_camera_process(config_common, camera_id, source_url, data_dir):
     """
     Runs a single camera pipeline in a separate process.
+    source_url can be an RTSP URL or a local video file path.
     """
-    print(f"[Worker {camera_id}] Starting with video {video_path}")
+    print(f"[Worker {camera_id}] Starting with source: {source_url}")
     
     os.makedirs(data_dir, exist_ok=True)
 
@@ -35,9 +33,9 @@ def worker_camera_process(config_common, camera_id, video_path, data_dir):
             camera_id=camera_id,
             target_spg_ids=config_common['target_spg_ids'],
             camera_source="rtsp",
-            rtsp_url=video_path,
+            rtsp_url=source_url,
             preview=config_common['preview'], 
-            loop_video=True,
+            loop_video=config_common.get('loop_video', False),
             gallery_dir="data", 
             enable_notifier=False
         )
@@ -46,78 +44,118 @@ def worker_camera_process(config_common, camera_id, video_path, data_dir):
     except Exception as e:
         print(f"[Worker {camera_id}] Failed: {e}")
 
-def run_outlet_simulation(
-    outlet_id: str, 
-    video_files: List[str], 
-    base_data_dir: str,
-    preview: bool = True
-):
+
+def run_outlet(preview: bool = False, force_simulate: bool = False):
+    """
+    Main multi-camera outlet runner.
     
-    print(f"=== Simulation Started: {outlet_id} ===")
+    Modes:
+      --simulate flag (or force_simulate=True) → always use video files
+      Otherwise → use outlet.cameras RTSP URLs from config
+    """
     settings = load_settings()
     
-    # Use config values, but override outlet_id if provided in args
-    # (The script arg default is 'outlet_mkg', config is 'OUTLET_DEV')
-    # We'll use the script argument as the source of truth for outlet_id since it's an explicit input.
+    # ── Resolve outlet config ──
+    if settings.outlet is None:
+        print("[ERROR] No 'outlet' section found in config. Cannot run multi-camera mode.")
+        sys.exit(1)
     
-    print(f"[Config] Loaded SPG IDs: {settings.target.spg_ids}")
+    outlet = settings.outlet
+    outlet_id = outlet.id
+    target_spg_ids = outlet.target_spg_ids
     
+    print(f"=== Outlet Started: {outlet_id} ({outlet.name}) ===")
+    print(f"[Config] Target SPG IDs: {target_spg_ids}")
+    
+    # ── Resolve camera sources ──
+    # CLI --simulate flag OVERRIDES config dev.simulate
+    use_simulation = force_simulate or settings.dev.simulate
+    camera_sources = []  # List of (camera_id, source_url)
+    loop_video = False
+    
+    if use_simulation and settings.dev.video_files:
+        print(f"[Mode] SIMULATION — using {len(settings.dev.video_files)} video file(s)")
+        loop_video = True
+        for i, vf in enumerate(settings.dev.video_files):
+            if not os.path.exists(vf):
+                print(f"[WARN] Video file not found: {vf}")
+                continue
+            cam_id = f"cam_{i+1:02d}"
+            camera_sources.append((cam_id, vf))
+    else:
+        print(f"[Mode] PRODUCTION — using {len(outlet.cameras)} RTSP camera(s)")
+        for cam in outlet.cameras:
+            camera_sources.append((cam.id, cam.rtsp_url))
+    
+    if not camera_sources:
+        print("[ERROR] No valid camera sources. Check config.")
+        sys.exit(1)
+    
+    # ── Build common config for workers ──
     config_common = {
-        'process_fps': 5, # Reduced from 10 to 5 to save CPU
-        'threshold': settings.recognition.threshold,
+        'process_fps': settings.camera.process_fps,
         'threshold': settings.recognition.threshold,
         'grace_seconds': settings.presence.grace_seconds,
         'absent_seconds': settings.presence.absent_seconds,
         'outlet_id': outlet_id,
-        'target_spg_ids': settings.target.spg_ids,
-        'preview': preview
+        'target_spg_ids': target_spg_ids,
+        'preview': preview,
+        'loop_video': loop_video,
     }
 
-    processes = []
-    cam_data_dirs = []
-
+    base_data_dir = os.path.join(settings.storage.data_dir, "sim_output")
     os.makedirs(base_data_dir, exist_ok=True)
     
-    # 1. Start Workers
-    for i, video_file in enumerate(video_files):
-        cam_id = f"cam_{i+1:02d}"
+    # ── Clean old state to prevent stale alerts ──
+    old_state = os.path.join(base_data_dir, "outlet_state.json")
+    if os.path.exists(old_state):
+        os.remove(old_state)
+        print("[Cleanup] Removed old outlet_state.json")
+    
+    # ── 1. Start Worker Processes ──
+    processes = []
+    cam_data_dirs = []
+    
+    for cam_id, source_url in camera_sources:
         d_dir = os.path.join(base_data_dir, cam_id)
         cam_data_dirs.append(d_dir)
         
         p = multiprocessing.Process(
             target=worker_camera_process,
-            args=(config_common, cam_id, video_file, d_dir)
+            args=(config_common, cam_id, source_url, d_dir)
         )
         p.daemon = True
         p.start()
         processes.append(p)
+        print(f"[Started] {cam_id} → {source_url}")
 
-    # 2. Aggregator Loop (Main Process)
+    # ── 2. Setup Aggregator ──
     aggregator = OutletAggregator(
         outlet_id, 
         absent_seconds=config_common['absent_seconds'],
-        target_spg_ids=config_common['target_spg_ids']
+        target_spg_ids=target_spg_ids
     )
     
-    # Initialize Telegram Notifier
+    # ── 3. Setup Telegram ──
     load_dotenv()
     
     token = os.getenv("SPG_TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("SPG_TELEGRAM_CHAT_ID")
-    print(f"[DEBUG] Env Check - Token found: {bool(token)}, Chat-ID found: {bool(chat_id)}")
+    print(f"[Telegram] Token: {'✓' if token else '✗'}, Chat-ID: {'✓' if chat_id else '✗'}")
     
     notifier = None
     try:
         notifier = TelegramNotifier.from_env()
-        print("[Setup] Telegram notifier initialized successfully.")
-        notifier.send_message(f"🚀 Simulation Started: {outlet_id}\nChecking Telegram Connection...")
+        print("[Telegram] Notifier ready.")
     except Exception as e:
-        print(f"[WARN] Telegram integration disabled: {e}")
+        print(f"[WARN] Telegram disabled: {e}")
 
-    print("[Aggregator] Monitoring events...")
+    # ── 4. Main Aggregator Loop ──
+    print(f"[Aggregator] Monitoring {len(camera_sources)} cameras...")
     
     event_files = [os.path.join(d, "events.jsonl") for d in cam_data_dirs]
     file_pointers = {}
+    state_path = os.path.join(base_data_dir, "outlet_state.json")
 
     try:
         while True:
@@ -129,7 +167,7 @@ def run_outlet_simulation(
                 
                 if ef not in file_pointers:
                     f = open(ef, 'r')
-                    f.seek(0, 2) # Seek to end (tail)
+                    f.seek(0, 2)  # Seek to end (tail mode)
                     file_pointers[ef] = f
                 
                 f = file_pointers[ef]
@@ -147,22 +185,19 @@ def run_outlet_simulation(
             # Feed aggregator
             if events_batch:
                 aggregator.ingest_events(events_batch)
-                # print(f"[Aggregator] Ingested {len(events_batch)} events")
             
-            # Tick logic
+            # Tick → check for global absence alerts
             alerts = aggregator.tick()
             for al in alerts:
-                # Try to find a snapshot in any camera folder
+                # Find snapshot from any camera
                 snap_path = None
                 for d in cam_data_dirs:
                     p = os.path.join(d, "snapshots", f"latest_{al.spg_id}.jpg")
                     if os.path.exists(p):
-                        # Pick the first one found, or maybe check timestamps if needed.
-                        # For now, any recent snapshot is better than none.
                         snap_path = p
                         break
                 
-                # Construct Message
+                # Build alert message
                 reason = al.details.get("reason", "global_absence")
                 duration = al.details.get("seconds_since_last_seen") or al.details.get("seconds_since_startup", "?")
                 
@@ -181,57 +216,42 @@ def run_outlet_simulation(
                     f"🕒 **Time:** {timestamp}\n"
                 )
                 print(text)
-                print(al.model_dump_json(indent=2))
                 
                 if notifier:
-                    print(f"[DEBUG] Attempting to send Telegram alert for SPG {al.spg_id}...")
                     try:
                         if snap_path:
-                            print(f"[DEBUG] Sending photo: {snap_path}")
                             notifier.send_photo(snap_path, caption=text)
                         else:
-                            print(f"[DEBUG] Sending text only.")
                             notifier.send_message(text)
-                        print("[DEBUG] Telegram sent successfully.")
                     except Exception as ex:
-                        print(f"[ERROR] Failed to send Telegram: {ex}")
-                else:
-                    print("[DEBUG] Notifier is OFF/None. Check .env and startup logs.")
+                        print(f"[ERROR] Telegram failed: {ex}")
+            
+            # Dump state for dashboard
+            aggregator.dump_state(state_path)
             
             # Check worker health
             if not any(p.is_alive() for p in processes):
-                print("All workers finished/died.")
-                break
+                print("[INFO] All workers finished/died.")
+                break          
                 
             time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nStopping simulation...")
+        print("\nStopping...")
         for p in processes:
             p.terminate()
 
+
 if __name__ == "__main__":
     import argparse
-    import sys
 
-    parser = argparse.ArgumentParser(description="Simulate Outlet Multi-Camera Aggregation")
-    parser.add_argument("videos", nargs="+", help="List of video file paths to simulate cameras")
-    parser.add_argument("--outlet", default="outlet_mkg", help="Outlet ID")
-    parser.add_argument("--data-dir", default="data/sim_output", help="Output directory")
-    parser.add_argument("--no-preview", action="store_true", help="Disable video preview windows to save resources")
-
+    parser = argparse.ArgumentParser(description="Run Multi-Camera Outlet Monitoring")
+    parser.add_argument("--preview", action="store_true", help="Show video preview windows")
+    parser.add_argument("--no-preview", action="store_true", help="Disable video preview (for servers)")
+    parser.add_argument("--simulate", action="store_true", help="Force simulation mode (use video files)")
+    
     args = parser.parse_args()
     
-    # Verify files
-    valid_videos = []
-    for v in args.videos:
-        if os.path.exists(v):
-            valid_videos.append(v)
-        else:
-            print(f"[WARN] Video not found: {v}")
+    show_preview = args.preview and not args.no_preview
     
-    if not valid_videos:
-        print("No valid video files provided.")
-        sys.exit(1)
-        
-    run_outlet_simulation(args.outlet, valid_videos, args.data_dir, not args.no_preview)
+    run_outlet(preview=show_preview, force_simulate=args.simulate)

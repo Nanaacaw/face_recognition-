@@ -3,6 +3,7 @@ import yaml
 from pathlib import Path
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from typing import Optional
 
 
 class CameraConfig(BaseModel):
@@ -29,10 +30,29 @@ class StorageConfig(BaseModel):
     snapshot_retention_days: int
 
 
+# single-camera
 class TargetConfig(BaseModel):
-    spg_ids: list[str]
-    outlet_id: str
-    camera_id: str
+    spg_ids: list[str] = []
+    outlet_id: str = ""
+    camera_id: str = ""
+
+
+# multi-camera outlet
+class CameraEntry(BaseModel):
+    id: str
+    rtsp_url: str
+
+
+class OutletConfig(BaseModel):
+    id: str
+    name: str = ""
+    cameras: list[CameraEntry] = []
+    target_spg_ids: list[str] = []
+
+
+class DevConfig(BaseModel):
+    simulate: bool = False
+    video_files: list[str] = []
 
 
 class AppConfig(BaseModel):
@@ -40,7 +60,9 @@ class AppConfig(BaseModel):
     recognition: RecognitionConfig
     presence: PresenceConfig
     storage: StorageConfig
-    target: TargetConfig
+    target: TargetConfig = TargetConfig()
+    outlet: OutletConfig | None = None
+    dev: DevConfig = DevConfig()
 
 def load_settings(config_path: str | None = None) -> AppConfig:
     load_dotenv()
