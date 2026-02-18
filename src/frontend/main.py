@@ -11,8 +11,22 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 
 # ── Config ──
+# Resolve BASE_DIR correctly relative to src/frontend/main.py
+# current file: src/frontend/main.py
+# dirname -> src/frontend
+# dirname -> src
+# dirname -> root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(BASE_DIR, "data", "sim_output")
+# Data dir logic: check if data/sim_output exists, otherwise fallback to data
+# run_outlet saves to: data/sim_output
+SIM_OUTPUT_DIR = os.path.join(BASE_DIR, "data", "sim_output")
+
+if not os.path.exists(SIM_OUTPUT_DIR):
+    # Fallback for dev environment if folder not created yet
+    print(f"Warning: {SIM_OUTPUT_DIR} does not exist yet. Dashboard might be empty.")
+    os.makedirs(SIM_OUTPUT_DIR, exist_ok=True)
+
+DATA_DIR = SIM_OUTPUT_DIR
 
 app = FastAPI(title="SPG Dashboard", version="2.0")
 

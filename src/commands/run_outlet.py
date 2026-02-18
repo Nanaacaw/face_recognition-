@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 
 from src.settings.logger import logger
+from src.storage.snapshot_cleaner import SnapshotCleaner
 
 def worker_camera_process(config_common, camera_id, source_url, data_dir):
     """
@@ -125,6 +126,16 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         os.remove(old_state)
         logger.info("[Cleanup] Removed old outlet_state.json")
     
+    # ── Run Snapshot Cleaner (Startup) ──
+    try:
+        cleaner = SnapshotCleaner(
+            data_dir=settings.storage.data_dir,
+            retention_days=settings.storage.snapshot_retention_days
+        )
+        cleaner.clean()
+    except Exception as e:
+        logger.error(f"[Cleanup] Snapshot cleaning failed: {e}")
+    
     # 1. Start Worker Processes
     processes = []
     cam_data_dirs = []
@@ -154,7 +165,9 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     
     token = os.getenv("SPG_TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("SPG_TELEGRAM_CHAT_ID")
-    logger.info(f"[Telegram] Token: {'✓' if token else '✗'}, Chat-ID: {'✓' if chat_id else '✗'}")
+    token_status = "OK" if token else "MISSING"
+    chat_status = "OK" if chat_id else "MISSING"
+    logger.info(f"[Telegram] Token: {token_status}, Chat-ID: {chat_status}")
     
     notifier = None
     try:
@@ -180,7 +193,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                 
                 if ef not in file_pointers:
                     f = open(ef, 'r')
-                    f.seek(0, 2)  # Seek to end (tail mode)
+                    f.seek(0, 2)
                     file_pointers[ef] = f
                 
                 f = file_pointers[ef]
@@ -192,18 +205,15 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                             ev = Event(**data)
                             events_batch.append(ev)
                         except Exception:
-                            # Log warning but continue
                             logger.warning(f"Failed to parse event line from {ef}", exc_info=False)
                     line = f.readline()
             
-            # Feed aggregator
             if events_batch:
                 aggregator.ingest_events(events_batch)
             
-            # Tick → check for global absence alerts
             alerts = aggregator.tick()
             for al in alerts:
-                # Find snapshot from any camera
+
                 snap_path = None
                 for d in cam_data_dirs:
                     p = os.path.join(d, "snapshots", f"latest_{al.spg_id}.jpg")
@@ -228,8 +238,8 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                     f"👤 **Personnel:** {spg_name} ({al.spg_id})\n"
                     f"⏱️ **Duration:** {duration}s\n"
                     f"🕒 **Time:** {timestamp}\n"
-                )
-                logger.warning(f"ALERT FIRED: {text.replace(chr(10), ' ')}")
+                )    
+                # logger.warning(f"ALERT FIRED | Outlet: {al.outlet_id} | SPG: {al.spg_id} | Reason: {reason}")
                 
                 if notifier:
                     try:

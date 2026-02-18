@@ -23,7 +23,7 @@ data/
 .DS_Store
 Thumbs.db
 .agents
-
+logs
 mkg_*.yaml
 
 sample_video
