@@ -9,6 +9,10 @@ class RTSPReader:
         self.cap = None
         self._last_emit = 0.0
         self._interval = 1.0 / self.process_fps
+        self.loop = False
+
+    def set_loop(self, loop: bool):
+        self.loop = loop
 
 
     def start(self):
@@ -22,7 +26,12 @@ class RTSPReader:
             return None
         ok, frame = self.cap.read()
         if not ok:
-            return None
+            if self.loop:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = self.cap.read()
+            
+            if not ok:
+                return None
 
         now = time.time()
         if now - self._last_emit >= self._interval:

@@ -25,8 +25,11 @@ def run_webcam_recognition(
     camera_source: str = "webcam",
     rtsp_url: str | None = None,
     preview: bool = True,
+    loop_video: bool = False,
+    gallery_dir: str | None = None,
 ):
-    store = GalleryStore(data_dir)
+    actual_gallery_dir = gallery_dir if gallery_dir else data_dir
+    store = GalleryStore(actual_gallery_dir)
     gallery = store.load_all()
 
     event_store = EventStore(data_dir)
@@ -55,6 +58,7 @@ def run_webcam_recognition(
         if not rtsp_url:
             raise ValueError("rtsp_url must be provided for RTSP source")
         reader = RTSPReader(rtsp_url, process_fps)
+        reader.set_loop(loop_video)
     else:
         raise ValueError(f"Unknown camera source: {camera_source}")
 
