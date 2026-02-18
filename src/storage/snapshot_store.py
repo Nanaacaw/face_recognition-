@@ -13,4 +13,11 @@ class SnapshotStore:
         path = self.root / filename
         cv2.imwrite(str(path), frame)
         return str(path)
+
+    def save_latest_face(self, spg_id: str, frame) -> str:
+        """Saves or overwrites the latest known face for an SPG."""
+        filename = f"latest_{spg_id}.jpg"
+        path = self.root / filename
+        cv2.imwrite(str(path), frame)
+        return str(path)
         

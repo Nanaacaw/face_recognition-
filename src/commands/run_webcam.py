@@ -27,6 +27,7 @@ def run_webcam_recognition(
     preview: bool = True,
     loop_video: bool = False,
     gallery_dir: str | None = None,
+    enable_notifier: bool = True,
 ):
     actual_gallery_dir = gallery_dir if gallery_dir else data_dir
     store = GalleryStore(actual_gallery_dir)
@@ -36,10 +37,11 @@ def run_webcam_recognition(
     snapshot_store = SnapshotStore(data_dir)
 
     notifier = None
-    try:
-        notifier = TelegramNotifier.from_env()
-    except Exception as e:
-        print("[WARN] Telegram notifier disabled:", e)
+    if enable_notifier:
+        try:
+            notifier = TelegramNotifier.from_env()
+        except Exception as e:
+            print("[WARN] Telegram notifier disabled:", e)
 
     matcher = Matcher(threshold=threshold)
     matcher.load_gallery(gallery)
@@ -99,6 +101,8 @@ def run_webcam_recognition(
     print(f"[RUN] Gallery loaded: {list(gallery.keys())}  threshold={threshold}")
 
 
+    last_snapshot_times = {}
+
     try:
         while True:
             frame = reader.read_throttled()
@@ -121,6 +125,12 @@ def run_webcam_recognition(
                         continue
 
                     seen_this_frame.add(spg_id)
+                    
+                    # Throttled snapshot saving (max 1x per second)
+                    last_save = last_snapshot_times.get(spg_id, 0)
+                    if now - last_save > 1.0:
+                        snapshot_store.save_latest_face(spg_id, frame)
+                        last_snapshot_times[spg_id] = now
 
                     for e in engine.observe_seen(
                         spg_id=spg_id,
