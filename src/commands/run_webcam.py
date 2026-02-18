@@ -13,6 +13,8 @@ from src.pipeline.presence_logic import PresenceEngine
 from src.notification.telegram_notifier import TelegramNotifier
 from src.pipeline.rtsp_reader import RTSPReader
 
+from src.settings.logger import logger
+
 def run_webcam_recognition(
     data_dir: str,
     webcam_index: int,
@@ -42,7 +44,7 @@ def run_webcam_recognition(
         try:
             notifier = TelegramNotifier.from_env()
         except Exception as e:
-            print("[WARN] Telegram notifier disabled:", e)
+            logger.warning(f"Telegram notifier disabled: {e}")
 
     matcher = Matcher(threshold=threshold)
     matcher.load_gallery(gallery)
@@ -74,7 +76,7 @@ def run_webcam_recognition(
             event.details["snapshot_path"] = snap_path
 
         event_store.append(event)
-        print("[EVENT]", event.model_dump())
+        logger.info(f"[EVENT] {event.model_dump()}")
 
         if notifier is not None and event.event_type == "ABSENT_ALERT_FIRED":
             seconds = event.details.get("seconds_since_last_seen")
@@ -93,13 +95,13 @@ def run_webcam_recognition(
                 else:
                     notifier.send_message(text)
             except Exception as ex:
-                print("[ERROR] Failed to send Telegram alert:", ex)
+                logger.error(f"Failed to send Telegram alert: {ex}")
 
     detector.start()
     reader.start()
 
-    print("[RUN] Webcam recognition started. Press 'q' to quit.")
-    print(f"[RUN] Gallery loaded: {list(gallery.keys())}  threshold={threshold}")
+    logger.info("Webcam recognition started. Press 'q' to quit.")
+    logger.info(f"Gallery loaded: {list(gallery.keys())}  threshold={threshold}")
 
     last_snapshot_times = {}
     last_frame_time = 0

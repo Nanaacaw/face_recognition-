@@ -12,19 +12,33 @@ from src.settings.settings import load_settings
 from dotenv import load_dotenv
 
 
+from src.settings.logger import logger
+
 def worker_camera_process(config_common, camera_id, source_url, data_dir):
     """
     Runs a single camera pipeline in a separate process.
-    source_url can be an RTSP URL or a local video file path.
+    source_url can be an RTSP URL, a local video file path, or "0"/"1" for webcam.
     """
-    print(f"[Worker {camera_id}] Starting with source: {source_url}")
+    logger.info(f"[Worker {camera_id}] Starting with source: {source_url}")
     
     os.makedirs(data_dir, exist_ok=True)
+
+    camera_source = "rtsp"
+    rtsp_url = source_url
+    webcam_index = 0
+
+    if source_url == "webcam" or (isinstance(source_url, str) and source_url.isdigit()):
+        camera_source = "webcam"
+        webcam_index = int(source_url) if source_url.isdigit() else 0
+        rtsp_url = None
+        logger.info(f"[Worker {camera_id}] Mode: WEBCAM (index={webcam_index})")
+    else:
+        logger.info(f"[Worker {camera_id}] Mode: RTSP/FILE ({source_url})")
 
     try:
         run_webcam_recognition(
             data_dir=data_dir,
-            webcam_index=0, 
+            webcam_index=webcam_index, 
             process_fps=config_common['process_fps'],
             threshold=config_common['threshold'],
             grace_seconds=config_common['grace_seconds'],
@@ -32,8 +46,8 @@ def worker_camera_process(config_common, camera_id, source_url, data_dir):
             outlet_id=config_common['outlet_id'],
             camera_id=camera_id,
             target_spg_ids=config_common['target_spg_ids'],
-            camera_source="rtsp",
-            rtsp_url=source_url,
+            camera_source=camera_source,
+            rtsp_url=rtsp_url,
             preview=config_common['preview'], 
             loop_video=config_common.get('loop_video', False),
             gallery_dir="data", 
@@ -42,7 +56,7 @@ def worker_camera_process(config_common, camera_id, source_url, data_dir):
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f"[Worker {camera_id}] Failed: {e}")
+        logger.error(f"[Worker {camera_id}] Failed: {e}", exc_info=True)
 
 
 def run_outlet(preview: bool = False, force_simulate: bool = False):
@@ -57,15 +71,15 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     
     # ── Resolve outlet config ──
     if settings.outlet is None:
-        print("[ERROR] No 'outlet' section found in config. Cannot run multi-camera mode.")
+        logger.error("No 'outlet' section found in config. Cannot run multi-camera mode.")
         sys.exit(1)
     
     outlet = settings.outlet
     outlet_id = outlet.id
     target_spg_ids = outlet.target_spg_ids
     
-    print(f"=== Outlet Started: {outlet_id} ({outlet.name}) ===")
-    print(f"[Config] Target SPG IDs: {target_spg_ids}")
+    logger.info(f"=== Outlet Started: {outlet_id} ({outlet.name}) ===")
+    logger.info(f"[Config] Target SPG IDs: {target_spg_ids}")
     
     # ── Resolve camera sources ──
     # CLI --simulate flag OVERRIDES config dev.simulate
@@ -74,24 +88,23 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     loop_video = False
     
     if use_simulation and settings.dev.video_files:
-        print(f"[Mode] SIMULATION — using {len(settings.dev.video_files)} video file(s)")
+        logger.info(f"[Mode] SIMULATION — using {len(settings.dev.video_files)} video file(s)")
         loop_video = True
         for i, vf in enumerate(settings.dev.video_files):
             if not os.path.exists(vf):
-                print(f"[WARN] Video file not found: {vf}")
+                logger.warning(f"Video file not found: {vf}")
                 continue
             cam_id = f"cam_{i+1:02d}"
             camera_sources.append((cam_id, vf))
     else:
-        print(f"[Mode] PRODUCTION — using {len(outlet.cameras)} RTSP camera(s)")
+        logger.info(f"[Mode] PRODUCTION — using {len(outlet.cameras)} RTSP camera(s)")
         for cam in outlet.cameras:
             camera_sources.append((cam.id, cam.rtsp_url))
     
     if not camera_sources:
-        print("[ERROR] No valid camera sources. Check config.")
+        logger.error("No valid camera sources. Check config.")
         sys.exit(1)
     
-    # ── Build common config for workers ──
     config_common = {
         'process_fps': settings.camera.process_fps,
         'threshold': settings.recognition.threshold,
@@ -110,9 +123,9 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     old_state = os.path.join(base_data_dir, "outlet_state.json")
     if os.path.exists(old_state):
         os.remove(old_state)
-        print("[Cleanup] Removed old outlet_state.json")
+        logger.info("[Cleanup] Removed old outlet_state.json")
     
-    # ── 1. Start Worker Processes ──
+    # 1. Start Worker Processes
     processes = []
     cam_data_dirs = []
     
@@ -127,7 +140,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         p.daemon = True
         p.start()
         processes.append(p)
-        print(f"[Started] {cam_id} → {source_url}")
+        logger.info(f"[Started] {cam_id} → {source_url}")
 
     # ── 2. Setup Aggregator ──
     aggregator = OutletAggregator(
@@ -141,17 +154,17 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     
     token = os.getenv("SPG_TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("SPG_TELEGRAM_CHAT_ID")
-    print(f"[Telegram] Token: {'✓' if token else '✗'}, Chat-ID: {'✓' if chat_id else '✗'}")
+    logger.info(f"[Telegram] Token: {'✓' if token else '✗'}, Chat-ID: {'✓' if chat_id else '✗'}")
     
     notifier = None
     try:
         notifier = TelegramNotifier.from_env()
-        print("[Telegram] Notifier ready.")
+        logger.info("[Telegram] Notifier ready.")
     except Exception as e:
-        print(f"[WARN] Telegram disabled: {e}")
+        logger.warning(f"[Telegram] Disabled: {e}")
 
     # ── 4. Main Aggregator Loop ──
-    print(f"[Aggregator] Monitoring {len(camera_sources)} cameras...")
+    logger.info(f"[Aggregator] Monitoring {len(camera_sources)} cameras...")
     
     event_files = [os.path.join(d, "events.jsonl") for d in cam_data_dirs]
     file_pointers = {}
@@ -179,7 +192,8 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                             ev = Event(**data)
                             events_batch.append(ev)
                         except Exception:
-                            pass
+                            # Log warning but continue
+                            logger.warning(f"Failed to parse event line from {ef}", exc_info=False)
                     line = f.readline()
             
             # Feed aggregator
@@ -215,7 +229,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                     f"⏱️ **Duration:** {duration}s\n"
                     f"🕒 **Time:** {timestamp}\n"
                 )
-                print(text)
+                logger.warning(f"ALERT FIRED: {text.replace(chr(10), ' ')}")
                 
                 if notifier:
                     try:
@@ -224,20 +238,20 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                         else:
                             notifier.send_message(text)
                     except Exception as ex:
-                        print(f"[ERROR] Telegram failed: {ex}")
+                        logger.error(f"[Telegram] Failed to send alert: {ex}")
             
             # Dump state for dashboard
             aggregator.dump_state(state_path)
             
             # Check worker health
             if not any(p.is_alive() for p in processes):
-                print("[INFO] All workers finished/died.")
+                logger.info("All workers finished/died.")
                 break          
                 
             time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nStopping...")
+        logger.info("Stopping...")
         for p in processes:
             p.terminate()
 

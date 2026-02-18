@@ -9,7 +9,9 @@ class FaceDetector:
         self.app: FaceAnalysis | None = None
 
     def start(self) -> None:
-        self.app = FaceAnalysis(name="buffalo_l")
+        # ctx_id=0 means GPU (CUDA), ctx_id=-1 means CPU
+        # InsightFace auto-selects providers based on installed packages
+        self.app = FaceAnalysis(name="buffalo_l", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
         self.app.prepare(ctx_id=0, det_size=self.det_size)
 
     def detect(self, frame_bgr: np.ndarray):
