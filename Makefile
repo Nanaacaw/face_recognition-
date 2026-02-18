@@ -1,4 +1,4 @@
-.PHONY: install update run enroll debug help simulate simulate-light dashboard stream webcam
+.PHONY: install update run enroll debug help simulate simulate-light dashboard webcam
 
 help:
 	@echo "face_recog — targets:"
@@ -10,8 +10,7 @@ help:
 	@echo "  make debug          — preview webcam + face detection bbox"
 	@echo "  make simulate       — simulation with preview windows"
 	@echo "  make simulate-light — simulation without preview (save resources)"
-	@echo "  make dashboard      — start Streamlit monitoring dashboard"
-	@echo "  make stream         — start MJPEG streaming server"
+	@echo "  make dashboard      — start Monitoring Dashboard (FastAPI + Tailwind)"
 
 install:
 	conda env create -f environment.yml
@@ -41,8 +40,5 @@ simulate-light:
 	python -m src.commands.run_outlet --simulate --no-preview
 
 dashboard:
-	streamlit run src/dashboard/app.py
-
-stream:
-	@echo "Starting MJPEG Stream Server on port 8081..."
-	python -m src.dashboard.stream_server
+	@echo "Starting Dashboard on http://localhost:8000 ..."
+	python -m src.frontend.main
