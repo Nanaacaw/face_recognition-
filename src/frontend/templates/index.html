@@ -1,24 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SPG Outlet Monitoring</title>
-    
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
+
     <!-- Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <style>
-        [x-cloak] { display: none !important; }
+        [x-cloak] {
+            display: none !important;
+        }
+
         .glass {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
         }
     </style>
 </head>
+
 <body class="bg-gray-100 text-gray-800 font-sans" x-data="dashboard()">
 
     <!-- Navbar -->
@@ -32,17 +37,20 @@
                     </div>
                     <div class="ml-6 flex items-center space-x-4">
                         <span class="px-3 py-1 rounded-full text-xs font-medium"
-                              :class="systemStatus === 'LIVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                            :class="systemStatus === 'LIVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
                             <span class="w-2 h-2 rounded-full inline-block mr-1"
-                                  :class="systemStatus === 'LIVE' ? 'bg-green-500' : 'bg-red-500'"></span>
+                                :class="systemStatus === 'LIVE' ? 'bg-green-500' : 'bg-red-500'"></span>
                             <span x-text="systemStatus"></span>
                         </span>
                         <span class="text-xs text-gray-500" x-text="'Last Update: ' + lastUpdate"></span>
                     </div>
                 </div>
                 <div class="flex items-center space-x-4">
-                    <button @click="toggleCameras()" 
-                            class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                    <a href="/manage" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                        👥 Manage SPG
+                    </a>
+                    <button @click="toggleCameras()"
+                        class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
                         <span x-text="showCameras ? 'Hide Cameras' : 'Show Cameras'"></span>
                     </button>
                 </div>
@@ -51,7 +59,7 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
+
         <!-- Stats Row -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <!-- Total -->
@@ -80,7 +88,8 @@
         <div x-show="showCameras" x-transition.duration.300ms class="mb-8">
             <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center">
                 <span>📹 Live Feeds</span>
-                <span class="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded">MJPEG (Low Latency)</span>
+                <span class="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded">MJPEG (Low
+                    Latency)</span>
             </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <template x-for="cam in cameras" :key="cam.id">
@@ -91,7 +100,8 @@
                         </div>
                     </div>
                 </template>
-                <div x-show="cameras.length === 0" class="col-span-full bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center text-gray-500">
+                <div x-show="cameras.length === 0"
+                    class="col-span-full bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center text-gray-500">
                     No active cameras detected.
                 </div>
             </div>
@@ -99,23 +109,23 @@
 
         <!-- Main Content Grid -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
+
             <!-- SPG Status Grid (Left, wider) -->
             <div class="lg:col-span-2 space-y-6">
                 <h2 class="text-lg font-bold text-gray-900">👥 Personnel Status</h2>
-                
+
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <template x-for="spg in sortedSpgs" :key="spg.id">
                         <div class="bg-white rounded-xl shadow-sm overflow-hidden border transition-all duration-300 hover:shadow-md"
-                             :class="{
+                            :class="{
                                 'border-green-500 ring-1 ring-green-500': spg.status === 'PRESENT',
                                 'border-red-500 ring-1 ring-red-500': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
                                 'border-gray-200': spg.status === 'NOT_SEEN_YET'
                              }">
-                            
+
                             <!-- Header Status Bar -->
                             <div class="px-4 py-2 text-xs font-bold uppercase tracking-wide flex justify-between items-center"
-                                 :class="{
+                                :class="{
                                     'bg-green-50 text-green-700': spg.status === 'PRESENT',
                                     'bg-red-50 text-red-700': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
                                     'bg-gray-50 text-gray-600': spg.status === 'NOT_SEEN_YET'
@@ -126,23 +136,28 @@
 
                             <div class="p-4 flex items-start space-x-4">
                                 <!-- Photo -->
-                                <div class="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 flex-shrink-0 border-2 border-white shadow-sm">
+                                <div
+                                    class="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 flex-shrink-0 border-2 border-white shadow-sm">
                                     <template x-if="spg.snapshot_url">
                                         <img :src="spg.snapshot_url" class="w-full h-full object-cover">
                                     </template>
                                     <template x-if="!spg.snapshot_url">
-                                        <div class="w-full h-full flex items-center justify-center text-gray-400 text-xl">👤</div>
+                                        <div
+                                            class="w-full h-full flex items-center justify-center text-gray-400 text-xl">
+                                            👤</div>
                                     </template>
                                 </div>
 
                                 <!-- Info -->
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-medium text-gray-900 truncate" x-text="spg.name || 'Unknown'"></p>
+                                    <p class="text-sm font-medium text-gray-900 truncate"
+                                        x-text="spg.name || 'Unknown'"></p>
                                     <p class="text-xs text-gray-500 truncate" x-text="'ID: ' + spg.id"></p>
-                                    
+
                                     <div class="mt-2 flex items-center text-xs text-gray-500">
                                         <span class="mr-1">🕒 Last seen:</span>
-                                        <span x-text="spg.last_seen_ts ? new Date(spg.last_seen_ts * 1000).toLocaleTimeString() : '-'"></span>
+                                        <span
+                                            x-text="spg.last_seen_ts ? new Date(spg.last_seen_ts * 1000).toLocaleTimeString() : '-'"></span>
                                     </div>
                                 </div>
                             </div>
@@ -158,15 +173,15 @@
                 </div>
                 <div class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                     <template x-for="ev in events" :key="ev.ts + ev.spg_id">
-                        <div class="p-3 rounded-lg text-sm border-l-4"
-                             :class="{
+                        <div class="p-3 rounded-lg text-sm border-l-4" :class="{
                                 'bg-green-50 border-green-400': ev.event_type.includes('PRESENT') || ev.event_type.includes('SEEN'),
                                 'bg-red-50 border-red-400': ev.event_type.includes('ABSENT'),
                                 'bg-gray-50 border-gray-300': !ev.event_type.includes('PRESENT') && !ev.event_type.includes('ABSENT')
                              }">
                             <div class="flex justify-between items-start">
                                 <span class="font-bold text-gray-800" x-text="ev.name || ev.spg_id"></span>
-                                <span class="text-xs text-gray-400" x-text="new Date(ev.ts * 1000).toLocaleTimeString()"></span>
+                                <span class="text-xs text-gray-400"
+                                    x-text="new Date(ev.ts * 1000).toLocaleTimeString()"></span>
                             </div>
                             <div class="text-xs text-gray-600 mt-1" x-text="ev.event_type.replace(/_/g, ' ')"></div>
                             <div class="text-xs text-gray-400 mt-0.5 flex justify-between">
@@ -216,9 +231,9 @@
                         this.systemStatus = 'ERROR';
                     }
                 },
-                
+
                 async fetchCameras() {
-                     try {
+                    try {
                         const res = await fetch('/api/cameras');
                         const cams = await res.json();
                         this.cameras = cams.map(c => ({
@@ -264,11 +279,12 @@
                 formatDuration(seconds) {
                     if (!seconds) return '0s';
                     if (seconds < 60) return `${seconds}s`;
-                    if (seconds < 3600) return `${Math.floor(seconds/60)}m`;
-                    return `${Math.floor(seconds/3600)}h ${Math.floor((seconds%3600)/60)}m`;
+                    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+                    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
                 }
             }
         }
     </script>
 </body>
+
 </html>
