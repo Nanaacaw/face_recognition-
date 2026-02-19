@@ -84,13 +84,17 @@ def run_webcam_recognition(
         logger.info(f"[EVENT] {event.model_dump()}")
 
         if notifier is not None and event.event_type == "ABSENT_ALERT_FIRED":
-            seconds = event.details.get("seconds_since_last_seen")
+            seconds = event.details.get("seconds_since_last_seen", "?")
+            spg_name = event.name or event.spg_id
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(event.ts))
+            
             text = (
-                f"⚠️ SPG ABSENT ALERT\n"
-                f"Outlet: {event.outlet_id}\n"
-                f"Camera: {event.camera_id}\n"
-                f"SPG: {event.name or event.spg_id}\n"
-                f"Last seen: {seconds}s ago"
+                f"⚠️ **SPG ABSENCE DETECTED** ⚠️\n\n"
+                f"📍 **Outlet:** {event.outlet_id}\n"
+                f"📷 **Camera:** {event.camera_id}\n"
+                f"👤 **Personnel:** {spg_name} ({event.spg_id})\n"
+                f"⏱️ **Duration:** {seconds}s\n"
+                f"🕒 **Time:** {timestamp}\n"
             )
 
             snap = event.details.get("snapshot_path")

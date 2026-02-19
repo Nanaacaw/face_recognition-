@@ -233,7 +233,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                      title = "🚫 **PERSONNEL NEVER ARRIVED** 🚫"
                 
                 spg_name = al.name or "Unknown"
-                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+                timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(al.ts))
                 
                 text = (
                     f"{title}\n\n"
