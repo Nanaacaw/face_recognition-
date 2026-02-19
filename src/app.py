@@ -32,7 +32,11 @@ def cmd_debug(config_path: str | None):
         cfg.camera.webcam_index or 0,
         cfg.camera.process_fps,
     )
-    detector = FaceDetector(det_size=(640, 640))
+    detector = FaceDetector(
+        name=getattr(cfg.recognition, "model_name", "buffalo_s"),
+        providers=getattr(cfg.recognition, "execution_providers", None),
+        det_size=tuple(getattr(cfg.recognition, "det_size", (640, 640)))
+    )
 
     reader.start()
     detector.start()
@@ -114,7 +118,7 @@ def main():
             camera_source=cfg.camera.source,
             rtsp_url=cfg.camera.rtsp_url,
             preview=cfg.camera.preview,
-            model_name=getattr(cfg.recognition, "model_name", "buffalo_l"),
+            model_name=getattr(cfg.recognition, "model_name", "buffalo_s"),
             execution_providers=getattr(cfg.recognition, "execution_providers", None),
             det_size=getattr(cfg.recognition, "det_size", (640, 640)),
         )
@@ -136,6 +140,9 @@ def main():
             webcam_index=cfg.camera.webcam_index or 0,
             process_fps=cfg.camera.process_fps,
             samples=args.samples,
+            model_name=getattr(cfg.recognition, "model_name", "buffalo_s"),
+            execution_providers=getattr(cfg.recognition, "execution_providers", None),
+            det_size=tuple(getattr(cfg.recognition, "det_size", (640, 640))),
         )
         return
 

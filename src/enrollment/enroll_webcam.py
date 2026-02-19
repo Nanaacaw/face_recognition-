@@ -15,9 +15,16 @@ def enroll_from_webcam(
     samples: int = 30,
     min_det_score: float = 0.60,
     min_face_width_px: int = 100,
+    model_name: str = "buffalo_s",
+    execution_providers: list[str] | None = None,
+    det_size: tuple[int, int] = (640, 640),
 ):
     reader = WebcamReader(webcam_index, process_fps)
-    detector = FaceDetector(det_size=(640, 640))
+    detector = FaceDetector(
+        name=model_name,
+        providers=execution_providers,
+        det_size=det_size
+    )
     store = GalleryStore(data_dir)
 
     detector.start()

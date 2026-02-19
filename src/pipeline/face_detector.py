@@ -4,7 +4,7 @@ import numpy as np
 from insightface.app import FaceAnalysis
 
 class FaceDetector:
-    def __init__(self, name: str = "buffalo_l", providers: list[str] | None = None, det_size=(640,640)):
+    def __init__(self, name: str = "buffalo_s", providers: list[str] | None = None, det_size=(640,640)):
         self.det_size = det_size
         self.name = name
         self.providers = providers

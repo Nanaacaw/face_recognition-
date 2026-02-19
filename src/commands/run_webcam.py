@@ -69,7 +69,7 @@ def run_webcam_recognition(
         raise ValueError(f"Unknown camera source: {camera_source}")
 
     detector = FaceDetector(
-        name=kwargs.get("model_name", "buffalo_l"),
+        name=kwargs.get("model_name", "buffalo_s"),
         providers=kwargs.get("execution_providers", None),
         det_size=tuple(kwargs.get("det_size", (640, 640)))
     )
