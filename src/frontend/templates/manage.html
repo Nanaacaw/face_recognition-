@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage SPG — Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+
+        .drop-zone {
+            transition: all 0.2s ease;
+        }
+
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.05);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 font-sans" x-data="manageApp()" x-cloak>
+
+    <!-- Navbar -->
+    <nav class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <span class="text-2xl mr-2">👥</span>
+                    <h1 class="text-xl font-bold text-gray-900">Manage SPG</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                        ← Monitoring Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Stats Row -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="text-sm font-medium text-gray-500">Total Terdaftar</div>
+                <div class="mt-2 text-3xl font-bold text-gray-900" x-text="gallery.length">0</div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
+                <div class="text-sm font-medium text-gray-500">Dengan Foto</div>
+                <div class="mt-2 text-3xl font-bold text-green-600" x-text="gallery.filter(g => g.has_photo).length">0
+                </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
+                <div class="text-sm font-medium text-gray-500">Total Samples</div>
+                <div class="mt-2 text-3xl font-bold text-blue-600"
+                    x-text="gallery.reduce((a, g) => a + g.num_samples, 0)">0</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- Gallery Table (Left) -->
+            <div class="lg:col-span-2">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">📋 SPG Terdaftar</h2>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <table class="w-full">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Foto</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">ID</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Nama</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Samples</th>
+                                <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <template x-for="spg in gallery" :key="spg.spg_id">
+                                <tr class="hover:bg-gray-50 transition-colors">
+                                    <td class="px-4 py-3">
+                                        <div
+                                            class="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+                                            <template x-if="spg.has_photo">
+                                                <img :src="'/api/gallery/' + spg.spg_id + '/photo'"
+                                                    class="w-full h-full object-cover">
+                                            </template>
+                                            <template x-if="!spg.has_photo">
+                                                <span class="text-gray-400">👤</span>
+                                            </template>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm font-mono text-gray-700" x-text="spg.spg_id"></td>
+                                    <td class="px-4 py-3 text-sm font-medium text-gray-900" x-text="spg.name"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-600" x-text="spg.num_samples"></td>
+                                    <td class="px-4 py-3">
+                                        <button @click="confirmDelete(spg)"
+                                            class="text-xs text-red-600 hover:text-red-800 font-medium transition-colors">
+                                            🗑️ Hapus
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div x-show="gallery.length === 0" class="p-12 text-center text-gray-400 text-sm">
+                        Belum ada SPG terdaftar. Gunakan form di samping untuk mendaftarkan.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enrollment Form (Right) -->
+            <div>
+                <h2 class="text-lg font-bold text-gray-900 mb-4">➕ Enrollment Baru</h2>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
+
+                    <!-- SPG ID -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">SPG ID</label>
+                        <input type="text" x-model="form.spg_id" placeholder="Contoh: 005"
+                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                    </div>
+
+                    <!-- Name -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Nama</label>
+                        <input type="text" x-model="form.name" placeholder="Contoh: Budi Santoso"
+                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                    </div>
+
+                    <!-- Tab Switcher -->
+                    <div class="flex border-b border-gray-200">
+                        <button @click="inputMode = 'upload'"
+                            :class="inputMode === 'upload' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center">
+                            📁 Upload Foto
+                        </button>
+                        <button @click="inputMode = 'webcam'"
+                            :class="inputMode === 'webcam' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                            class="flex-1 py-2 text-sm font-medium border-b-2 transition-colors text-center">
+                            📹 Webcam
+                        </button>
+                    </div>
+
+                    <!-- Upload Tab -->
+                    <div x-show="inputMode === 'upload'" x-transition>
+                        <div class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-400"
+                            @click="$refs.fileInput.click()"
+                            @dragover.prevent="$event.currentTarget.classList.add('dragover')"
+                            @dragleave.prevent="$event.currentTarget.classList.remove('dragover')"
+                            @drop.prevent="handleDrop($event)">
+                            <input type="file" x-ref="fileInput" multiple accept="image/*" class="hidden"
+                                @change="handleFileSelect($event)">
+                            <div class="text-gray-400 text-3xl mb-2">📸</div>
+                            <p class="text-sm text-gray-500">Klik atau drag foto ke sini</p>
+                            <p class="text-xs text-gray-400 mt-1">Maks. 5 foto (JPG/PNG)</p>
+                        </div>
+
+                        <!-- Preview uploaded files -->
+                        <div x-show="uploadedFiles.length > 0" class="mt-3 flex flex-wrap gap-2">
+                            <template x-for="(file, idx) in uploadedFiles" :key="idx">
+                                <div class="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-200 group">
+                                    <img :src="file.preview" class="w-full h-full object-cover">
+                                    <button @click="removeFile(idx)"
+                                        class="absolute inset-0 bg-black/50 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        ✕
+                                    </button>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Webcam Tab -->
+                    <div x-show="inputMode === 'webcam'" x-transition>
+                        <div class="space-y-3">
+                            <!-- Video preview -->
+                            <div class="relative bg-black rounded-lg overflow-hidden aspect-video">
+                                <video x-ref="webcamVideo" autoplay playsinline muted class="w-full h-full object-cover"
+                                    x-show="webcamActive"></video>
+                                <div x-show="!webcamActive"
+                                    class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm">
+                                    Kamera belum aktif
+                                </div>
+                            </div>
+
+                            <!-- Webcam controls -->
+                            <div class="flex gap-2">
+                                <button x-show="!webcamActive" @click="startWebcam()"
+                                    class="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                                    🎥 Nyalakan Kamera
+                                </button>
+                                <button x-show="webcamActive" @click="captureFrame()"
+                                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                                    📸 Capture (<span x-text="capturedFrames.length"></span>/5)
+                                </button>
+                                <button x-show="webcamActive" @click="stopWebcam()"
+                                    class="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition-colors">
+                                    ⏹️
+                                </button>
+                            </div>
+
+                            <!-- Captured frames preview -->
+                            <div x-show="capturedFrames.length > 0" class="flex flex-wrap gap-2">
+                                <template x-for="(frame, idx) in capturedFrames" :key="idx">
+                                    <div
+                                        class="relative w-16 h-16 rounded-lg overflow-hidden border-2 border-green-400 group">
+                                        <img :src="frame.preview" class="w-full h-full object-cover">
+                                        <button @click="removeCaptured(idx)"
+                                            class="absolute inset-0 bg-black/50 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                            ✕
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit -->
+                    <button @click="submitEnrollment()" :disabled="submitting || !canSubmit"
+                        :class="canSubmit && !submitting ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-300 cursor-not-allowed'"
+                        class="w-full text-white text-sm font-medium py-3 rounded-lg transition-colors flex items-center justify-center">
+                        <template x-if="submitting">
+                            <span>⏳ Memproses...</span>
+                        </template>
+                        <template x-if="!submitting">
+                            <span>✅ Daftarkan SPG</span>
+                        </template>
+                    </button>
+
+                    <!-- Status message -->
+                    <div x-show="statusMsg" x-transition
+                        :class="statusSuccess ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'"
+                        class="p-3 rounded-lg text-sm border">
+                        <span x-text="statusMsg"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Delete Confirmation Modal -->
+    <div x-show="showDeleteModal" x-transition.opacity
+        class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl shadow-xl p-6 max-w-sm mx-4" @click.outside="showDeleteModal = false">
+            <h3 class="text-lg font-bold text-gray-900 mb-2">Hapus SPG?</h3>
+            <p class="text-sm text-gray-600 mb-4">
+                Apakah Anda yakin ingin menghapus
+                <span class="font-bold" x-text="deleteTarget?.name"></span>
+                (<span x-text="deleteTarget?.spg_id"></span>)?
+                Data embedding dan foto akan dihapus permanen.
+            </p>
+            <div class="flex gap-3">
+                <button @click="showDeleteModal = false"
+                    class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 rounded-lg transition-colors">
+                    Batal
+                </button>
+                <button @click="executeDelete()"
+                    class="flex-1 bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg transition-colors">
+                    🗑️ Hapus
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function manageApp() {
+            return {
+                gallery: [],
+                form: { spg_id: '', name: '' },
+                inputMode: 'upload', // 'upload' | 'webcam'
+
+                // Upload state
+                uploadedFiles: [], // [{file: File, preview: dataURL}]
+
+                // Webcam state
+                webcamActive: false,
+                webcamStream: null,
+                capturedFrames: [], // [{blob: Blob, preview: dataURL}]
+
+                // Submit state
+                submitting: false,
+                statusMsg: '',
+                statusSuccess: false,
+
+                // Delete state
+                showDeleteModal: false,
+                deleteTarget: null,
+
+                init() {
+                    this.fetchGallery();
+                },
+
+                async fetchGallery() {
+                    try {
+                        const res = await fetch('/api/gallery');
+                        this.gallery = await res.json();
+                    } catch (e) {
+                        console.error('Failed to fetch gallery:', e);
+                    }
+                },
+
+                get canSubmit() {
+                    const hasId = this.form.spg_id.trim().length > 0;
+                    const hasName = this.form.name.trim().length > 0;
+                    const hasImages = this.inputMode === 'upload'
+                        ? this.uploadedFiles.length > 0
+                        : this.capturedFrames.length > 0;
+                    return hasId && hasName && hasImages;
+                },
+
+                // ── Upload handlers ──
+                handleFileSelect(event) {
+                    const files = Array.from(event.target.files);
+                    this.addFiles(files);
+                    event.target.value = '';
+                },
+
+                handleDrop(event) {
+                    event.currentTarget.classList.remove('dragover');
+                    const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+                    this.addFiles(files);
+                },
+
+                addFiles(files) {
+                    const remaining = 5 - this.uploadedFiles.length;
+                    const toAdd = files.slice(0, remaining);
+                    for (const file of toAdd) {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.uploadedFiles.push({ file, preview: e.target.result });
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                },
+
+                removeFile(idx) {
+                    this.uploadedFiles.splice(idx, 1);
+                },
+
+                // ── Webcam handlers ──
+                async startWebcam() {
+                    try {
+                        this.webcamStream = await navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+                        });
+                        this.$refs.webcamVideo.srcObject = this.webcamStream;
+                        this.webcamActive = true;
+                    } catch (e) {
+                        alert('Tidak dapat mengakses kamera: ' + e.message);
+                    }
+                },
+
+                stopWebcam() {
+                    if (this.webcamStream) {
+                        this.webcamStream.getTracks().forEach(t => t.stop());
+                        this.webcamStream = null;
+                    }
+                    this.webcamActive = false;
+                },
+
+                captureFrame() {
+                    if (this.capturedFrames.length >= 5) return;
+
+                    const video = this.$refs.webcamVideo;
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.getContext('2d').drawImage(video, 0, 0);
+
+                    canvas.toBlob((blob) => {
+                        const url = URL.createObjectURL(blob);
+                        this.capturedFrames.push({ blob, preview: url });
+                    }, 'image/jpeg', 0.9);
+                },
+
+                removeCaptured(idx) {
+                    URL.revokeObjectURL(this.capturedFrames[idx].preview);
+                    this.capturedFrames.splice(idx, 1);
+                },
+
+                // ── Submit ──
+                async submitEnrollment() {
+                    if (!this.canSubmit || this.submitting) return;
+
+                    this.submitting = true;
+                    this.statusMsg = '';
+
+                    const formData = new FormData();
+                    formData.append('spg_id', this.form.spg_id.trim());
+                    formData.append('name', this.form.name.trim());
+
+                    if (this.inputMode === 'upload') {
+                        this.uploadedFiles.forEach((f, i) => {
+                            formData.append(`file${i}`, f.file);
+                        });
+                    } else {
+                        this.capturedFrames.forEach((f, i) => {
+                            formData.append(`file${i}`, f.blob, `capture_${i}.jpg`);
+                        });
+                    }
+
+                    try {
+                        const res = await fetch('/api/gallery/enroll', {
+                            method: 'POST',
+                            body: formData,
+                        });
+                        const data = await res.json();
+
+                        if (data.success) {
+                            this.statusSuccess = true;
+                            this.statusMsg = `✅ ${data.name} (${data.spg_id}) berhasil didaftarkan — ${data.num_samples} sample(s).`;
+                            this.resetForm();
+                            await this.fetchGallery();
+                        } else {
+                            this.statusSuccess = false;
+                            this.statusMsg = `❌ ${data.error}`;
+                        }
+                    } catch (e) {
+                        this.statusSuccess = false;
+                        this.statusMsg = `❌ Network error: ${e.message}`;
+                    } finally {
+                        this.submitting = false;
+                    }
+                },
+
+                resetForm() {
+                    this.form = { spg_id: '', name: '' };
+                    this.uploadedFiles = [];
+                    this.capturedFrames.forEach(f => URL.revokeObjectURL(f.preview));
+                    this.capturedFrames = [];
+                    this.stopWebcam();
+                },
+
+                // ── Delete ──
+                confirmDelete(spg) {
+                    this.deleteTarget = spg;
+                    this.showDeleteModal = true;
+                },
+
+                async executeDelete() {
+                    if (!this.deleteTarget) return;
+                    const id = this.deleteTarget.spg_id;
+                    this.showDeleteModal = false;
+
+                    try {
+                        const res = await fetch(`/api/gallery/${id}`, { method: 'DELETE' });
+                        const data = await res.json();
+                        if (data.success) {
+                            this.statusSuccess = true;
+                            this.statusMsg = `🗑️ ${id} berhasil dihapus.`;
+                        } else {
+                            this.statusSuccess = false;
+                            this.statusMsg = `❌ ${data.error}`;
+                        }
+                        await this.fetchGallery();
+                    } catch (e) {
+                        this.statusSuccess = false;
+                        this.statusMsg = `❌ Gagal menghapus: ${e.message}`;
+                    }
+
+                    this.deleteTarget = null;
+                },
+
+                // ── Cleanup ──
+                destroy() {
+                    this.stopWebcam();
+                    this.capturedFrames.forEach(f => URL.revokeObjectURL(f.preview));
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
