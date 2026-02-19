@@ -5,81 +5,69 @@ Dashboard realtime untuk monitoring kehadiran SPG di outlet.
 ## Quick Start
 
 ```bash
-# Terminal 1: Jalankan simulasi
+# Terminal 1: Jalankan simulasi (Opsional, jika ingin data dummy)
 make simulate-light
 
 # Terminal 2: Buka dashboard
-make dashboard
+python -m src.frontend.main
 ```
 
-Dashboard akan terbuka otomatis di browser pada `http://localhost:8501`.
+Dashboard akan terbuka otomatis di browser pada `http://localhost:8000`.
 
 ## Fitur
 
-### 1. Header & System Status
+### 1. Monitoring (Realtime)
+Halaman utama (`/`) menampilkan status kehadiran SPG.
 
-- Nama outlet (uppercase)
-- Status **LIVE** / **OFFLINE** (berdasarkan freshness data)
-- Last update timestamp
-
-### 2. Metrics Overview
-
-| Metric              | Deskripsi                                                  |
-| ------------------- | ---------------------------------------------------------- |
-| **Total Personnel** | Jumlah SPG terdaftar di config                             |
-| **Present**         | SPG yang terdeteksi aktif                                  |
-| **Absent**          | SPG yang hilang (termasuk Never Arrived)                   |
-| **Attendance Rate** | Persentase kehadiran (hijau ≥80%, kuning ≥50%, merah <50%) |
-
-### 3. Personnel Status Cards
-
-Kartu untuk setiap SPG menampilkan:
-
-- **Nama & ID**
-- **Status Badge** dengan warna:
+- **Status Badge**:
   - 🟢 PRESENT — Aktif terdeteksi
   - 🔴 ABSENT — Hilang setelah sebelumnya hadir
   - 🟠 NEVER ARRIVED — Tidak pernah terdeteksi sejak startup
   - ⚪ WAITING — Masih dalam grace period
-- **Timer** — Durasi sejak terakhir terlihat
-- **Foto Snapshot** — Foto terakhir yang diambil oleh kamera
+- **Event Log**: Tabel log aktivitas terbaru dari semua kamera.
+- **Camera Stream**: Klik "Show Cameras" untuk melihat feed MJPEG (jika tersedia).
 
-> Kartu diurutkan berdasarkan prioritas: Absent → Never Arrived → Waiting → Present
+### 2. Manage SPG (Enrollment)
+Halaman baru (`/manage`) untuk mendaftarkan wajah SPG.
 
-### 4. Event Log
+**Cara Enroll:**
+1.  Klik menu **"👥 Manage SPG"** di pojok kanan atas.
+2.  Isi **SPG ID** dan **Nama**.
+3.  Pilih Metode:
+    - **📁 Upload Foto**: Drag & drop 1-5 file foto wajah.
+    - **📹 Webcam**: Gunakan kamera laptop/PC untuk capture wajah langsung.
+4.  Klik **"Daftarkan SPG"**.
 
-Tabel event realtime dari semua kamera:
+> **Note:**
+> - Pastikan pencahayaan cukup terang.
+> - Wajah harus menghadap kamera.
+> - Sistem otomatis mendeteksi wajah terbaik dari foto yang diupload.
 
-- Filter berdasarkan **Event Type** atau **Personnel ID**
-- Menampilkan: Waktu, Tipe Event, Nama SPG, Kamera
-
-### 5. Sidebar Settings
-
-- **Data Directory** — Folder data simulasi
-- **Refresh Rate** — Interval refresh (1–10 detik)
-- **Auto Refresh** — Toggle on/off
-- **Show Event Log** — Tampilkan/sembunyikan event log
-- **Max Events** — Batasi jumlah event yang dimuat
+**Hapus SPG:**
+Klik tombol **🗑️ Hapus** pada tabel daftar SPG untuk menghapus data permanent (json + foto).
 
 ## Arsitektur
 
 ```
-run_outlet.py  ──→  outlet_state.json  ←──  app.py (Streamlit)
-    │                                            │
-    ├── cam_01/events.jsonl  ──────────────────→ │ (Event Log)
-    ├── cam_02/events.jsonl  ──────────────────→ │
-    └── cam_*/snapshots/latest_XXX.jpg  ───────→ │ (Photos)
+[Browser] <──> [FastAPI (main.py)] <──> [GalleryStore]
+                        │
+                        ▼
+                 [FaceDetector] (Singleton)
 ```
 
-**run_outlet.py** menulis `outlet_state.json` setiap 100ms.
-**app.py** membaca file ini setiap N detik (configurable).
+- **Backend**: FastAPI
+- **Frontend**: Jinja2 Templates + Alpine.js + Tailwind CSS
+- **Storage**: JSON-based (`data/gallery/*.json`)
 
 ## Konfigurasi
 
-Target SPG dan parameter lainnya dikonfigurasi di `configs/app.dev.yaml`:
+Semua parameter (Model, Threshold, Camera) diatur di `configs/app.dev.yaml`.
 
 ```yaml
-target:
-  spg_ids: ["001", "002", "003", "004", "005", "006", "007"]
-  outlet_id: "OUTLET_DEV"
+recognition:
+  model_name: "buffalo_l"       # Model deteksi (buffalo_s / buffalo_l)
+  det_size: [640, 640]          # Ukuran input deteksi
+  execution_providers:
+  - "CUDAExecutionProvider"     # Prioritas GPU
+  - "CPUExecutionProvider"
 ```

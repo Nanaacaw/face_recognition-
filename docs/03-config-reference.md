@@ -82,6 +82,38 @@ Must be tuned in staging.
 
 ---
 
+## recognition.model_name
+Type: string
+Default: "buffalo_s"
+Allowed: "buffalo_s" | "buffalo_l"
+
+Description:
+Model deteksi wajah yang digunakan.
+- `buffalo_s`: Lebih cepat (MobileFaceNet), akurasi standar.
+- `buffalo_l`: Lebih akurat (ResNet50), lebih berat.
+
+---
+
+## recognition.det_size
+Type: list[int, int]
+Default: [640, 640]
+
+Description:
+Ukuran input gambar untuk deteksi wajah.
+Resolusi lebih tinggi = deteksi wajah kecil lebih baik, tapi lebih lambat.
+
+---
+
+## recognition.execution_providers
+Type: list[string]
+Default: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+Description:
+Urutan prioritas hardware acceleration (ONNX Runtime).
+Jika CUDA tidak tersedia, otomatis fallback ke CPU.
+
+---
+
 ## recognition.min_consecutive_hits
 Type: int  
 Recommended: 2–3  

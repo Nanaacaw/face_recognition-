@@ -5,7 +5,7 @@ Sistem melakukan monitoring kehadiran SPG berdasarkan face recognition.
 Jika SPG target tidak terdeteksi berada di area (ROI) lebih dari 5 menit,
 maka sistem mengirim alert ke Telegram disertai bukti (snapshot) dan event log.
 
-Scope awal: Webcam (Windows).
+Scope awal: Webcam (Windows) + Web Dashboard.
 Scope berikutnya: RTSP CCTV store (swap input source tanpa ubah core logic).
 
 ---
@@ -15,7 +15,7 @@ Scope berikutnya: RTSP CCTV store (swap input source tanpa ubah core logic).
 - **Face detection**: mendeteksi lokasi wajah pada frame.
 - **Face recognition**: menentukan identitas wajah (match ke SPG gallery).
 - **Embedding**: vektor representasi wajah hasil model (InsightFace).
-- **Gallery**: kumpulan embedding milik SPG yang sudah di-enroll.
+- **Gallery**: kumpulan embedding milik SPG yang sudah di-enroll (JSON + Photo).
 - **ROI (Zone)**: area frame yang dianggap “area kerja SPG”.
 - **Hit**: 1 hasil recognition yang memenuhi syarat (threshold + ROI).
 - **Presence**: status hadir berdasarkan hit terakhir.
@@ -32,7 +32,10 @@ Scope berikutnya: RTSP CCTV store (swap input source tanpa ubah core logic).
 - `spg_id` (string)
 - `name` (string)
 - `embeddings[]` (list of vectors)
-- metadata kualitas sampel (optional)
+- `last_face_crop` (jpg) — untuk visualisasi dashboard
+- Input source:
+  - **Upload Foto** (via Dashboard)
+  - **Webcam Capture** (via Dashboard)
 
 ---
 

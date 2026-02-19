@@ -144,11 +144,30 @@ Responsibility:
 
 ---
 
+### 3.9 Web Dashboard & API (New)
+
+**Frontend**:
+- UI Monitoring Realtime (Alpine.js + Jinja2)
+- Manage SPG (Enrollment Form)
+
+**Backend API**:
+- `GET /api/state`: Provide global aggregated state
+- `POST /api/gallery/enroll`: Handle photo upload & embedding extraction
+- `GET /stream/{cam_id}`: Proxy MJPEG stream
+
+Responsibility:
+- Provide user interface
+- Handle enrollment (Photo -> FaceDetector -> GalleryStore)
+- Read-only monitoring of system state
+
+---
+
 ## 4) Dependency Rules
 
 Allowed dependency direction:
 
 FrameSource → Detector → Embedder → Matcher → Presence → EventDispatcher → Storage / Notifier
+Dashboard → Storage (Read) / Detector (Enrollment)
 
 Not allowed:
 - Presence importing cv2
@@ -176,12 +195,11 @@ Behavior difference must come from config.
 
 ## 6) Future Extensions (Not in MVP)
 
-- Multi-camera support
+- Multi-camera support (Done via OutletAggregator)
 - Liveness detection
-- Database backend
-- Web dashboard
+- Database backend (SQLite/Postgres)
 - Metrics (Prometheus)
-- GPU acceleration
+- GPU acceleration (Supported via ONNX Runtime)
 
 Architecture must allow these without rewrite.
 
