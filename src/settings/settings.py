@@ -17,6 +17,9 @@ class CameraConfig(BaseModel):
 class RecognitionConfig(BaseModel):
     threshold: float
     min_consecutive_hits: int
+    model_name: str = "buffalo_l"
+    execution_providers: list[str] = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    det_size: tuple[int, int] | list[int] = [640, 640]
 
 
 class PresenceConfig(BaseModel):

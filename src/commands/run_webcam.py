@@ -31,6 +31,7 @@ def run_webcam_recognition(
     loop_video: bool = False,
     gallery_dir: str | None = None,
     enable_notifier: bool = True,
+    **kwargs,
 ):
     actual_gallery_dir = gallery_dir if gallery_dir else data_dir
     store = GalleryStore(actual_gallery_dir)
@@ -67,7 +68,11 @@ def run_webcam_recognition(
     else:
         raise ValueError(f"Unknown camera source: {camera_source}")
 
-    detector = FaceDetector(det_size=(640, 640))
+    detector = FaceDetector(
+        name=kwargs.get("model_name", "buffalo_l"),
+        providers=kwargs.get("execution_providers", None),
+        det_size=tuple(kwargs.get("det_size", (640, 640)))
+    )
 
     def handle_event(event, frame_for_snapshot=None):
         if event.event_type == "ABSENT_ALERT_FIRED" and frame_for_snapshot is not None:
@@ -101,7 +106,7 @@ def run_webcam_recognition(
     reader.start()
 
     logger.info("Webcam recognition started. Press 'q' to quit.")
-    logger.info(f"Gallery loaded: {list(gallery.keys())}  threshold={threshold}")
+    logger.info(f"Gallery loaded: {len(gallery)} people  threshold={threshold}")
 
     last_snapshot_times = {}
     last_frame_time = 0

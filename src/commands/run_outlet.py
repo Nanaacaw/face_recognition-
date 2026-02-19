@@ -52,7 +52,10 @@ def worker_camera_process(config_common, camera_id, source_url, data_dir):
             preview=config_common['preview'], 
             loop_video=config_common.get('loop_video', False),
             gallery_dir="data", 
-            enable_notifier=False
+            enable_notifier=False,
+            model_name=config_common['model_name'],
+            execution_providers=config_common['execution_providers'],
+            det_size=config_common['det_size'],
         )
     except KeyboardInterrupt:
         pass
@@ -70,7 +73,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     """
     settings = load_settings()
     
-    # ── Resolve outlet config ──
+    # Resolve outlet config
     if settings.outlet is None:
         logger.error("No 'outlet' section found in config. Cannot run multi-camera mode.")
         sys.exit(1)
@@ -82,8 +85,6 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     logger.info(f"=== Outlet Started: {outlet_id} ({outlet.name}) ===")
     logger.info(f"[Config] Target SPG IDs: {target_spg_ids}")
     
-    # ── Resolve camera sources ──
-    # CLI --simulate flag OVERRIDES config dev.simulate
     use_simulation = force_simulate or settings.dev.simulate
     camera_sources = []  # List of (camera_id, source_url)
     loop_video = False
@@ -115,18 +116,20 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         'target_spg_ids': target_spg_ids,
         'preview': preview,
         'loop_video': loop_video,
+        'model_name': settings.recognition.model_name,
+        'execution_providers': settings.recognition.execution_providers,
+        'det_size': settings.recognition.det_size,
     }
 
     base_data_dir = os.path.join(settings.storage.data_dir, "sim_output")
     os.makedirs(base_data_dir, exist_ok=True)
     
-    # ── Clean old state to prevent stale alerts ──
     old_state = os.path.join(base_data_dir, "outlet_state.json")
     if os.path.exists(old_state):
         os.remove(old_state)
         logger.info("[Cleanup] Removed old outlet_state.json")
     
-    # ── Run Snapshot Cleaner (Startup) ──
+    # Run Snapshot Cleaner (Startup)
     try:
         cleaner = SnapshotCleaner(
             data_dir=settings.storage.data_dir,
@@ -153,14 +156,14 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         processes.append(p)
         logger.info(f"[Started] {cam_id} → {source_url}")
 
-    # ── 2. Setup Aggregator ──
+    # 2. Setup Aggregator
     aggregator = OutletAggregator(
         outlet_id, 
         absent_seconds=config_common['absent_seconds'],
         target_spg_ids=target_spg_ids
     )
     
-    # ── 3. Setup Telegram ──
+    # 3. Setup Telegram
     load_dotenv()
     
     token = os.getenv("SPG_TELEGRAM_BOT_TOKEN")
@@ -176,7 +179,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     except Exception as e:
         logger.warning(f"[Telegram] Disabled: {e}")
 
-    # ── 4. Main Aggregator Loop ──
+    # 4. Main Aggregator Loop
     logger.info(f"[Aggregator] Monitoring {len(camera_sources)} cameras...")
     
     event_files = [os.path.join(d, "events.jsonl") for d in cam_data_dirs]
