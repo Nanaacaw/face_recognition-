@@ -14,12 +14,12 @@ class GalleryStore:
         path = self.root / f"{spg_id}.json"
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-        return Path
+        return path
 
     def save_face_crop(self, spg_id:str, face_img: np.ndarray) -> Path:
         path = self.root / f"{spg_id}_last_face.jpg"
         cv2.imwrite(str(path), face_img)
-        return Path
+        return path
 
     def load_all(self) -> dict[str, dict]:
         """
