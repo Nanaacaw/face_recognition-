@@ -43,7 +43,7 @@
       - path tercatat di event
 
 ## H) Telegram Alert
-- [x] `TELEGRAM_BOT_TOKEN` & `TELEGRAM_CHAT_ID` dibaca dari env
+- [x] `SPG_TELEGRAM_BOT_TOKEN` & `SPG_TELEGRAM_CHAT_ID` dibaca dari env
 - [x] Alert `ABSENT_ALERT_FIRED` masuk Telegram
 - [x] Snapshot terkirim sebagai foto (kalau enabled)
 

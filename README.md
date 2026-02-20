@@ -16,7 +16,7 @@ conda activate face_recog
 cp .env.example .env
 ```
 
-Edit `.env` untuk `TELEGRAM_BOT_TOKEN` dan `TELEGRAM_CHAT_ID` jika ingin alert Telegram. Edit `configs/app.dev.yaml` untuk threshold, FPS, grace/absent seconds, dan source kamera.
+Edit `.env` untuk `SPG_TELEGRAM_BOT_TOKEN` dan `SPG_TELEGRAM_CHAT_ID` jika ingin alert Telegram. `APP_ENV` memilih file config (`configs/app.<env>.yaml`), atau pakai `APP_CONFIG_PATH` untuk path custom.
 
 ## Command
 

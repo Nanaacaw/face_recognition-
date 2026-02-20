@@ -1,343 +1,273 @@
-# face_recog — Configuration Reference
+# face_recog - Configuration Reference
 
-Semua konfigurasi sistem dibaca dari:
+Semua parameter runtime dibaca dari file YAML.
 
-configs/app.<env>.yaml
+## Config Resolution Order
 
-Environment:
-- dev
-- staging
-- prod
+1. `APP_CONFIG_PATH` (jika diisi, langsung pakai path ini)
+2. `APP_ENV` -> `configs/app.<env>.yaml`
+3. Default environment: `dev`
 
-Secrets (Telegram) harus dibaca dari environment variables.
+Contoh:
 
----
-
-# 1) camera
-
-## camera.source
-Type: string  
-Allowed: "webcam" | "rtsp"  
-Description:
-Menentukan sumber video.
-
----
-
-## camera.webcam_index
-Type: int  
-Default: 0  
-Used when: source = webcam  
-Description:
-Index device webcam pada sistem Windows.
-
----
-
-## camera.rtsp_url
-Type: string  
-Used when: source = rtsp  
-Description:
-RTSP URL stream kamera.
-
----
-
-## camera.process_fps
-Type: int  
-Recommended: 3–5  
-Description:
-Berapa fps diproses untuk recognition.
-Frame lain boleh di-drop untuk menjaga performa.
-
-Impact:
-- Terlalu tinggi → CPU naik
-- Terlalu rendah → detection delay
-
----
-
-## camera.preview
-Type: boolean  
-Description:
-Jika true, tampilkan OpenCV preview window.
-Biasanya true di dev, false di prod.
-
----
-
-# 2) recognition
-
-## recognition.threshold
-Type: float (0.0–1.0)  
-Typical: 0.40–0.55  
-
-Description:
-Minimum similarity agar dianggap match.
-
-Lower value:
-- Lebih toleran
-- Risiko false positive naik
-
-Higher value:
-- Lebih ketat
-- Risiko false negative naik
-
-Must be tuned in staging.
-
----
-
-## recognition.model_name
-Type: string
-Default: "buffalo_s"
-Allowed: "buffalo_s" | "buffalo_l"
-
-Description:
-Model deteksi wajah yang digunakan.
-- `buffalo_s`: Lebih cepat (MobileFaceNet), akurasi standar.
-- `buffalo_l`: Lebih akurat (ResNet50), lebih berat.
-
----
-
-## recognition.det_size
-Type: list[int, int]
-Default: [640, 640]
-
-Description:
-Ukuran input gambar untuk deteksi wajah.
-Resolusi lebih tinggi = deteksi wajah kecil lebih baik, tapi lebih lambat.
-
----
-
-## recognition.execution_providers
-Type: list[string]
-Default: ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
-Description:
-Urutan prioritas hardware acceleration (ONNX Runtime).
-Jika CUDA tidak tersedia, otomatis fallback ke CPU.
-
----
-
-## recognition.min_consecutive_hits
-Type: int  
-Recommended: 2–3  
-
-Description:
-Jumlah hit berturut-turut sebelum dianggap valid SPG_SEEN.
-
-Purpose:
-Mengurangi noise dan false detection satu frame.
-
----
-
-# 3) presence
-
-## presence.grace_seconds
-Type: int  
-Recommended: 15–30  
-
-Description:
-Toleransi waktu hilang sementara (misalnya tertutup orang).
-
-Jika SPG tidak terlihat kurang dari waktu ini,
-status tetap dianggap PRESENT.
-
----
-
-## presence.absent_seconds
-Type: int  
-Default: 300 (5 menit)  
-
-Description:
-Batas waktu tidak terlihat sebelum alert dikirim.
-
-If:
-now - last_seen > absent_seconds
-→ ABSENT_ALERT_FIRED
-
----
-
-# 4) storage
-
-## storage.data_dir
-Type: string  
-Default: "./data"  
-
-Description:
-Root folder untuk:
-- gallery
-- snapshots
-- events.jsonl
-
----
-
-## storage.snapshot_enabled
-Type: boolean  
-Description:
-Jika true, sistem menyimpan snapshot saat alert.
-
----
-
-## storage.snapshot_retention_days
-Type: int  
-Recommended:
-- dev: 3–7
-- prod: 7–30
-
-Description:
-Berapa hari snapshot disimpan sebelum dihapus.
-
----
-
-# 5) target
-
-## target.spg_ids
-Type: list[string]  
-
-Description:
-Daftar SPG yang dimonitor.
-
-MVP:
-Biasanya hanya 1 SPG per kamera.
-
-Future:
-Bisa multi-SPG.
-
----
-
-## target.outlet_id
-Type: string  
-Description:
-Identifier outlet.
-
-Dicatat di event log dan Telegram.
-
----
-
-## target.camera_id
-Type: string  
-Description:
-Identifier kamera.
-
-Dicatat di event log dan Telegram.
-
----
-
-# 6) Environment Variables (Secrets)
-
-Must exist in system environment:
-
-- TELEGRAM_BOT_TOKEN
-- TELEGRAM_CHAT_ID
-- APP_ENV (dev/staging/prod)
-
-These must NEVER be committed to Git.
-
----
-
-# 7) Config Philosophy
-
-Rules:
-- Semua parameter yang mungkin berubah harus ada di config.
-- Tidak boleh hardcode threshold di source code.
-- Tidak boleh conditional logic berdasarkan ENV di kode.
-- Perbedaan behavior harus berasal dari config file.
-- RTSP credentials TIDAK boleh di-commit ke Git.
-  - `configs/app.dev.yaml` → gitignored.
-  - `configs/app.dev.yaml.example` → committed (template tanpa credential).
-
----
-
-# 8) inference (Centralized Mode)
-
-## inference.frame_skip
-Type: int
-Default: 0
-
-Description:
-Jumlah frame yang dilewati antara setiap inference.
-- `0` = proses setiap frame (no skip)
-- `2` = proses 1 dari 3 frame
-
-Berguna pada hardware lemah dengan banyak kamera.
-
----
-
-## inference.max_frame_height
-Type: int
-Default: 720
-
-Description:
-Tinggi maksimum frame yang di-buffer di SharedMemory.
-Frame yang lebih tinggi akan di-resize otomatis sebelum dikirim ke InferenceServer.
-**Tidak mempengaruhi akurasi** — model InsightFace selalu resize ke `det_size` secara internal.
-
----
-
-## inference.max_frame_width
-Type: int
-Default: 1280
-
-Description:
-Lebar maksimum frame yang di-buffer di SharedMemory.
-Bersama `max_frame_height`, menentukan total alokasi RAM per kamera:
-`max_frame_height × max_frame_width × 3 bytes` (~2.6MB untuk 720p).
-
----
-
-# 9) Tuning Strategy
-
-Tuning order:
-
-1. Adjust recognition.threshold
-2. Adjust min_consecutive_hits
-3. Adjust grace_seconds
-4. Adjust process_fps
-5. Adjust inference.frame_skip (jika CPU/GPU overload)
-
-Never tune everything at once.
-
----
-
-# 10) Notification
-
-## notification.telegram_enabled
-Type: boolean
-Default: true
-
-Description:
-Kill-switch untuk notifikasi Telegram.
-- `true`: Kirim alert via Telegram (butuh env vars).
-- `false`: Silent mode (hanya log ke terminal/file).
-
-Berguna untuk debugging atau saat env vars belum disiapkan.
-
----
-
-# 11) Deployment
-
-## Centralized Mode (Production)
-
-Semua kamera dalam satu outlet dikelola oleh **1 command**:
-
-```bash
-# Terminal 1: Pipeline (auto-spawn semua workers + inference server)
-make run           # Production (RTSP cameras)
-make simulate      # Dev (video files)
-
-# Terminal 2: Dashboard
-make dashboard
+```env
+APP_ENV=dev
+# atau:
+APP_CONFIG_PATH=./configs/app.custom.yaml
 ```
 
-**Proses yang berjalan**: 1 main + 1 inference + N cameras + 1 dashboard = N + 3.
+---
 
-## Konfigurasi per Outlet
+## 1) camera
 
-Setiap outlet menggunakan 1 config file:
-```
-configs/app.dev.yaml       → Development
-configs/app.staging.yaml   → Staging
-configs/app.prod.yaml      → Production
-```
+### `camera.source`
+- Type: `string`
+- Allowed: `webcam | rtsp`
 
-Dipilih melalui `APP_ENV` di `.env`:
-```
-APP_ENV=dev       → configs/app.dev.yaml
-APP_ENV=prod      → configs/app.prod.yaml
-```
+### `camera.webcam_index`
+- Type: `int`
+- Used when: `camera.source=webcam`
+
+### `camera.rtsp_url`
+- Type: `string`
+- Used when: `camera.source=rtsp`
+
+### `camera.process_fps`
+- Type: `int`
+- Recommendation: `3-5`
+
+### `camera.preview`
+- Type: `bool`
+- Description: tampilkan preview OpenCV.
+
+---
+
+## 2) recognition
+
+### `recognition.threshold`
+- Type: `float` (`0.0-1.0`)
+- Typical: `0.40-0.55`
+
+### `recognition.min_consecutive_hits`
+- Type: `int`
+- Typical: `2-3`
+
+### `recognition.model_name`
+- Type: `string`
+- Default: `buffalo_s`
+- Allowed: `buffalo_s | buffalo_l`
+
+### `recognition.execution_providers`
+- Type: `list[string]`
+- Default: `["CUDAExecutionProvider", "CPUExecutionProvider"]`
+
+### `recognition.det_size`
+- Type: `list[int, int]` atau `tuple[int, int]`
+- Default: `[640, 640]`
+
+---
+
+## 3) presence
+
+### `presence.grace_seconds`
+- Type: `int`
+- Typical: `15-30`
+
+### `presence.absent_seconds`
+- Type: `int`
+- Default: `300`
+
+---
+
+## 4) storage
+
+### `storage.data_dir`
+- Type: `string`
+- Default: `./data`
+
+### `storage.snapshot_enabled`
+- Type: `bool`
+
+### `storage.snapshot_retention_days`
+- Type: `int`
+- Recommendation: dev `3-7`, prod `7-30`
+
+### `storage.sim_output_subdir`
+- Type: `string`
+- Default: `sim_output`
+- Description: output multi-camera (`outlet_state`, events, preview frame per kamera).
+
+### `storage.gallery_subdir`
+- Type: `string`
+- Default: `gallery`
+- Description: metadata gallery dan face crop terakhir.
+
+---
+
+## 5) target (single camera mode)
+
+### `target.spg_ids`
+- Type: `list[string]`
+
+### `target.outlet_id`
+- Type: `string`
+
+### `target.camera_id`
+- Type: `string`
+
+---
+
+## 6) outlet (multi-camera mode)
+
+### `outlet.id`
+- Type: `string`
+
+### `outlet.name`
+- Type: `string`
+
+### `outlet.cameras`
+- Type: `list[{id, rtsp_url}]`
+
+### `outlet.target_spg_ids`
+- Type: `list[string]`
+
+---
+
+## 7) inference
+
+### `inference.frame_skip`
+- Type: `int`
+- Default: `0`
+- Description: `0` proses semua frame, `2` proses 1 dari 3 frame.
+
+### `inference.max_frame_height`
+- Type: `int`
+- Default: `720`
+
+### `inference.max_frame_width`
+- Type: `int`
+- Default: `1280`
+
+---
+
+## 8) notification
+
+### `notification.telegram_enabled`
+- Type: `bool`
+- Default: `true`
+
+### `notification.telegram_bot_token_env`
+- Type: `string`
+- Default: `SPG_TELEGRAM_BOT_TOKEN`
+
+### `notification.telegram_chat_id_env`
+- Type: `string`
+- Default: `SPG_TELEGRAM_CHAT_ID`
+
+### `notification.timeout_sec`
+- Type: `int`
+- Default: `15`
+
+### `notification.max_retries`
+- Type: `int`
+- Default: `3`
+
+### `notification.retry_backoff_base_sec`
+- Type: `int`
+- Default: `2`
+
+### `notification.retry_after_default_sec`
+- Type: `int`
+- Default: `5`
+
+---
+
+## 9) runtime
+
+### `runtime.worker_idle_sleep_sec`
+- Type: `float`
+- Default: `0.05`
+
+### `runtime.main_loop_sleep_sec`
+- Type: `float`
+- Default: `0.05`
+
+### `runtime.preview_frame_save_interval_sec`
+- Type: `float`
+- Default: `0.2`
+
+### `runtime.preview_frame_width`
+- Type: `int`
+- Default: `640`
+
+### `runtime.preview_jpeg_quality`
+- Type: `int`
+- Default: `80`
+
+---
+
+## 10) dashboard
+
+### `dashboard.host`
+- Type: `string`
+- Default: `0.0.0.0`
+
+### `dashboard.port`
+- Type: `int`
+- Default: `8000`
+
+### `dashboard.reload`
+- Type: `bool`
+- Default: `true` (biasanya `false` di staging/prod)
+
+### `dashboard.live_window_seconds`
+- Type: `int`
+- Default: `10`
+
+### `dashboard.recent_events_limit`
+- Type: `int`
+- Default: `50`
+
+### `dashboard.stream_frame_interval_sec`
+- Type: `float`
+- Default: `0.2`
+
+### `dashboard.stream_error_sleep_sec`
+- Type: `float`
+- Default: `0.5`
+
+### `dashboard.stream_missing_frame_sleep_sec`
+- Type: `float`
+- Default: `1.0`
+
+---
+
+## 11) Environment Variables
+
+Required for Telegram notification:
+
+- `SPG_TELEGRAM_BOT_TOKEN`
+- `SPG_TELEGRAM_CHAT_ID`
+
+Optional:
+
+- `APP_ENV` (`dev`, `staging`, `prod`)
+- `APP_CONFIG_PATH` (custom config path)
+
+---
+
+## 12) Tuning Order (Recommended)
+
+1. `recognition.threshold`
+2. `recognition.min_consecutive_hits`
+3. `presence.grace_seconds`
+4. `camera.process_fps`
+5. `inference.frame_skip`
+
+---
+
+## 13) Deployment Notes
+
+- Centralized mode dijalankan via `make run` (production) atau `make simulate` (development simulation).
+- Dashboard dijalankan via `make dashboard`.
+- Jangan commit credential RTSP dan secret Telegram ke Git.
