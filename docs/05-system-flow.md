@@ -1,279 +1,217 @@
-# System Flow & Pipeline
+# System Flow and Runtime Architecture
 
-Dokumen ini menjelaskan alur data (data flow) utama dalam sistem Face Recognition.
-
----
-
-## 1. Enrollment Pipeline (Pendaftaran SPG)
-
-Proses mendaftarkan wajah baru ke dalam sistem.
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend as 🌐 Dashboard (Alpine.js)
-    participant Backend as ⚡ FastAPI (main.py)
-    participant Detector as 🧠 FaceDetector
-    participant Store as 📁 GalleryStore
-
-    User->>Frontend: Upload Foto / Capture Webcam
-    Frontend->>Backend: POST /api/gallery/enroll (Multipart)
-    
-    activate Backend
-    Backend->>Detector: detect(image)
-    Detector-->>Backend: face_embedding, face_crop
-    
-    Backend->>Store: save_person(spg_id, embeddings)
-    Backend->>Store: save_face_crop(spg_id, image)
-    Backend-->>Frontend: Success (200 OK)
-    deactivate Backend
-    
-    Frontend-->>User: Show Success & Update Table
-```
-
-**Keterangan:**
-1.  **Input**: Gambar (JPG/PNG) dari upload atau webcam.
-2.  **Processing**: `FaceDetector` (InsightFace) mendeteksi wajah & mengekstrak vektor (512-d).
-3.  **Storage**: Vektor disimpan sebagai JSON, crop wajah disimpan sebagai JPG untuk UI.
+Dokumen ini menjelaskan alur data aktual pada kode saat ini (terutama `run_outlet`, `InferenceServer`, dashboard FastAPI, dan mode simulasi).
 
 ---
 
-## 2. Centralized Inference Pipeline (Multi-Camera)
+## 1) Mode Operasi
 
-Arsitektur utama produksi. **1 InferenceServer** melayani **N kamera** secara bersamaan.
+### A. Single Camera (`python -m src.app run`)
+- Menggunakan `run_webcam.py`.
+- Detection + matching + presence berjalan dalam satu proses.
+- Cocok untuk dev cepat (webcam / satu RTSP).
+
+### B. Centralized Multi-Camera (`python -m src.commands.run_outlet`)
+- Dipakai oleh:
+  - `make run` (production RTSP dari `outlet.cameras`)
+  - `make simulate` (video file dari `dev.video_files`)
+- Arsitektur:
+  - `N` camera worker process
+  - `1` inference server process (model load sekali)
+  - `1` main process (router + aggregator + alert)
+
+---
+
+## 2) Centralized Pipeline (Production and Simulate)
 
 ```mermaid
 flowchart TD
-    subgraph proc_workers["Camera Workers (per-camera process)"]
-        W1[📹 Worker cam_01] 
-        W2[📹 Worker cam_02]
-        W3[📹 Worker cam_03]
+    subgraph workers["Camera Workers (N process)"]
+        W1["Worker cam_01"]
+        W2["Worker cam_02"]
+        WN["Worker cam_N"]
     end
 
-    subgraph shm["Shared Memory (zero-copy)"]
-        SHM1[sfb_cam_01]
-        SHM2[sfb_cam_02]
-        SHM3[sfb_cam_03]
+    subgraph shm["Shared Memory (per camera)"]
+        S1["buffer cam_01"]
+        S2["buffer cam_02"]
+        SN["buffer cam_N"]
     end
 
-    subgraph inference["InferenceServer (1 process, 1 model load)"]
-        DET[🧠 FaceDetector]
-        MAT[🔍 Matcher]
+    subgraph inf["InferenceServer (1 process)"]
+        DET["FaceDetector"]
+        MAT["Matcher"]
     end
 
-    subgraph main["Main Process (Router)"]
-        Router[📬 Result Router]
-        AGG[🔄 OutletAggregator]
-        EVT[📄 EventStore]
-        TG[📱 Telegram]
+    subgraph main["Main Process"]
+        ROUTER["Result Router"]
+        AGG["OutletAggregator"]
+        STORE["EventStore per camera"]
+        TG["TelegramNotifier (optional)"]
     end
 
-    W1 -->|write frame| SHM1
-    W2 -->|write frame| SHM2
-    W3 -->|write frame| SHM3
+    W1 -->|write frame| S1
+    W2 -->|write frame| S2
+    WN -->|write frame| SN
 
-    SHM1 --> DET
-    SHM2 --> DET
-    SHM3 --> DET
-
-    W1 -->|"metadata (cam_id, frame_id, ts)"| DET
+    W1 -->|metadata cam_id, frame_id, ts| DET
     W2 -->|metadata| DET
-    W3 -->|metadata| DET
+    WN -->|metadata| DET
 
-    DET --> MAT
-    MAT -->|results| Router
+    S1 --> DET
+    S2 --> DET
+    SN --> DET
 
-    Router -->|feedback_queue| W1
-    Router -->|feedback_queue| W2
-    Router -->|feedback_queue| W3
-    Router --> AGG
-    AGG --> EVT
-    AGG -->|ABSENT alert| TG
+    DET --> MAT --> ROUTER
+    ROUTER -->|feedback queue| W1
+    ROUTER -->|feedback queue| W2
+    ROUTER -->|feedback queue| WN
+    ROUTER --> AGG --> STORE
+    AGG -->|ABSENT_ALERT_FIRED| TG
 ```
-
-### Data Flow Detail
-
-1. **Camera Worker** membaca frame dari RTSP/webcam/video file
-2. Frame ditulis ke **SharedMemory** (zero-copy, tanpa pickle)
-3. Metadata ringan `(camera_id, frame_id, timestamp)` dikirim via `input_queue`
-4. **InferenceServer** membaca frame dari SharedMemory, menjalankan detection + matching
-5. Jika `frame_skip > 0`, N frame dilewati sebelum inference berikutnya
-6. Hasil (bbox, spg_id, similarity) dikirim ke `output_queue`
-7. **Main Process** mendistribusikan hasil:
-   - → `feedback_queue[cam_id]` untuk visualisasi bbox di worker  
-   - → `OutletAggregator` untuk logika kehadiran
-8. Jika frame asli lebih besar dari buffer SharedMemory, worker **auto-resize** sebelum write
-9. Bbox coordinates di-**scale balik** ke resolusi asli saat menggambar
-
-> **⚠️ IMPORTANT**: Bbox dihitung pada frame yang di-resize (max 720p), 
-> tapi digambar pada frame resolusi asli. Scale factor disimpan per-frame 
-> untuk memastikan posisi bbox akurat.
 
 ---
 
-## 3. Single Camera Mode (Dev/Debug)
+## 3) Step-by-Step Runtime Flow
 
-Mode sederhana untuk testing. Model di-load langsung di proses yang sama.
-
-```mermaid
-flowchart TD
-    Cam[📹 Camera Source] -->|Frame| Detect[🧠 FaceDetector]
-    Detect -->|Face Embedding| Match[🔍 Matcher]
-    
-    subgraph vectorized["Vectorized Matching"]
-        Match -->|Compare vs Gallery| Matrix[🔢 Dot Product]
-        Matrix -->|"Score > Threshold"| Result{IS MATCH?}
-    end
-    
-    Result -- Yes --> SPG[🟢 SPG_SEEN Event]
-    Result -- No --> Unknown[Unknown]
-    
-    SPG --> Log[📄 events.jsonl]
-    SPG --> Presence[⏱️ PresenceEngine]
-```
-
-> **Note**: Mode ini (`run_webcam.py`) load model per-proses. 
-> Hanya untuk development. Untuk production, gunakan centralized mode.
+1. Worker membaca frame dari source:
+   - RTSP / webcam / video file (simulate mode).
+2. Worker throttle output frame berdasarkan `camera.process_fps`.
+3. Worker kirim frame ke inference:
+   - Mode utama: tulis ke shared memory + kirim metadata ke `input_queue`.
+   - Fallback: kirim frame langsung via queue jika shared memory gagal.
+4. Inference server menerima item, lalu:
+   - Optional skip frame dengan `inference.frame_skip`.
+   - Jalankan detection + matching.
+   - Kirim hasil ke `output_queue`.
+5. Main process:
+   - Broadcast hasil ke `feedback_queue` worker (untuk bbox overlay preview worker).
+   - Simpan event matched ke `events.jsonl` per kamera.
+   - Ingest ke `OutletAggregator` (ANY-of-N logic).
+   - Fire absence alert ke Telegram (jika enabled).
+   - Dump `outlet_state.json` untuk dashboard.
+6. Worker menyimpan `latest_frame.jpg` berkala untuk dashboard stream.
 
 ---
 
-## 4. Presence & Alert Logic
-
-Bagaimana sistem menentukan SPG hadir atau hilang.
-
-```mermaid
-stateDiagram-v2
-    [*] --> NOT_SEEN
-    
-    NOT_SEEN --> PRESENT : First Hit (SPG_SEEN)
-    
-    state PRESENT {
-        [*] --> Active
-        Active --> GracePeriod : "No Hit > grace_seconds"
-        GracePeriod --> Active : Hit detected
-    }
-    
-    PRESENT --> ABSENT : "No Hit > absent_seconds"
-    
-    ABSENT --> Alerting : Trigger Alert (1x only)
-    Alerting --> ABSENT : Alert Sent
-    
-    ABSENT --> PRESENT : Hit detected (Re-entry)
-```
-
-**Rules:**
-1. **Hit**: Frame dengan face match yang valid.
-2. **Grace Period**: Toleransi kedipan / occlusion sebentar (`grace_seconds`).
-3. **Absent**: Tidak ada hit selama `absent_seconds` (default 300s production).
-4. **Alert**: Telegram dikirim **hanya 1x** saat transisi ke ABSENT.
-5. **ANY-of-N**: Pada multi-camera, SPG dianggap PRESENT jika terdeteksi di **salah satu** kamera.
-
----
-
-## 5. Dashboard (Monitoring Realtime)
+## 4) Dashboard Data Flow
 
 ```mermaid
 flowchart LR
-    subgraph pipeline["Pipeline Process"]
-        Workers --> |save thumbnail| JPG[latest_frame.jpg]
-        AGG2[OutletAggregator] --> |dump| JSON[outlet_state.json]
+    subgraph pipe["Pipeline"]
+        J1["cam_x/snapshots/latest_frame.jpg"]
+        J2["outlet_state.json"]
+        J3["cam_x/events.jsonl"]
     end
 
-    subgraph dashboard["FastAPI Dashboard"]
-        API["/api/state"] -->|read| JSON
-        MJPEG["/stream/cam_id"] -->|read| JPG
+    subgraph api["FastAPI Dashboard"]
+        A1["/stream/{cam_id}"]
+        A2["/api/state"]
+        A3["/api/events"]
     end
 
     subgraph browser["Browser"]
-        UI[Alpine.js UI] -->|poll 3s| API
-        IMG[MJPEG Stream] -->|~5 FPS| MJPEG
-        IMG -->|click| Modal[🔍 Fullscreen Modal]
+        B1["Live camera tiles (MJPEG)"]
+        B2["Status cards"]
+        B3["Recent events"]
     end
+
+    J1 --> A1 --> B1
+    J2 --> A2 --> B2
+    J3 --> A3 --> B3
 ```
 
-**FPS Budget:**
-
-| Layer | Max FPS | Configurable |
-|---|---|---|
-| Camera capture | `process_fps` (5) | ✅ `camera.process_fps` |
-| Inference | ~3-10 (tergantung GPU/CPU) | ✅ `inference.frame_skip` |
-| Thumbnail save | ~1 FPS | Hardcoded (1x/sec) |
-| MJPEG dashboard | ~5 FPS | `asyncio.sleep(0.2)` |
+Catatan:
+- Stream dashboard membaca file `latest_frame.jpg`, bukan stream RTSP langsung.
+- Jadi FPS live dashboard ditentukan oleh interval simpan frame + interval baca stream.
 
 ---
 
-## 6. Process Architecture
+## 5) Arsitektur Proses
 
 ```
-[Main Process]
-  ├── InferenceServer (child process)
-  │   └── FaceDetector + Matcher (loaded once)
-  ├── Camera Worker cam_01 (child process)
-  ├── Camera Worker cam_02 (child process)
-  ├── Camera Worker cam_03 (child process)
-  ├── Camera Worker cam_04 (child process)
-  └── Result Router + OutletAggregator (in main loop)
+[Main Process: run_outlet]
+  |- InferenceServer (child process, model load sekali)
+  |- CameraWorker cam_01 (child process)
+  |- CameraWorker cam_02 (child process)
+  |- ...
+  `- Router + Aggregator loop
 
 [Separate Process]
-  └── FastAPI Dashboard (uvicorn)
+  `- FastAPI dashboard (make dashboard)
 ```
 
-**Total processes**: 1 (main) + 1 (inference) + N (cameras) + 1 (dashboard) = N + 3
+Total proses saat centralized mode:
+- `1 main + 1 inference + N worker + 1 dashboard = N + 3`
 
 ---
 
-## 7. Notes & Known Limitations
+## 6) Konfigurasi yang Mengatur Throughput
 
-### Performance
+### `camera.process_fps`
+- Lokasi: reader (`WebcamReader` dan `RTSPReader`).
+- Berlaku di:
+  - single webcam mode
+  - production (`make run`)
+  - simulate (`make simulate`)
+- Fungsi: membatasi frame yang diteruskan ke pipeline (bukan kualitas kamera).
 
-- **SharedMemory max size**: Buffer dialokasi saat startup berdasarkan `max_frame_height × max_frame_width × 3`. Frame yang lebih besar akan di-resize otomatis.
-- **`process_fps` terlalu tinggi** (>10) tidak berguna — inference dan dashboard tidak bisa consume secepat itu. Rekomendasi: 5 FPS.
-- **`frame_skip`** berguna pada hardware lemah: `frame_skip=2` artinya proses 1 dari 3 frame.
+### `inference.frame_skip`
+- Lokasi: `InferenceServer`.
+- Fungsi: skip inference N frame antar proses inference.
+- Efek: event/bbox update lebih jarang, beban inferensi turun.
 
-### Koordinat Bbox
+### `runtime.preview_frame_save_interval_sec`
+- Lokasi: worker.
+- Fungsi: interval update `latest_frame.jpg` untuk dashboard.
 
-- Model inference berjalan pada frame yang sudah di-resize ke batas SharedMemory (max 720p).
-- `det_size` (640×640) adalah resolusi internal InsightFace — independen dari ukuran frame input.
-- Bbox di-scale balik ke resolusi asli saat menggambar → akurat selama `bbox_scale` di-track.
+### `dashboard.stream_frame_interval_sec`
+- Lokasi: dashboard stream generator.
+- Fungsi: interval pengiriman frame MJPEG ke browser.
 
-### Dashboard
-
-- MJPEG stream menggunakan async generator dengan disconnect detection. Restart server → hard refresh browser (`Ctrl+Shift+R`) jika stuck.
-- Click camera thumbnail untuk modal fullscreen.
-- State di-poll setiap 3 detik — bukan realtime push.
-
-### Config Security
-
-- `configs/app.dev.yaml` di-gitignore (mengandung RTSP credentials).
-- `configs/app.dev.yaml.example` di-commit sebagai template.
-- Telegram secrets di `.env` (juga di-gitignore).
-
----
-
-## 8. Edge Cases
-
-| Case | Behavior | Mitigation |
-|---|---|---|
-| SharedMemory gagal create (OS limit) | Graceful fallback ke Queue mode (pickle) | Log warning, tetap jalan |
-| Frame > buffer size | Auto-resize ke batas buffer | Transparent, no accuracy loss |
-| InferenceServer crash | Main process detect `p_server.is_alive() == False`, exit | Perlu external supervisor (systemd) |
-| Feedback queue full | `put_nowait` + catch `Full` → skip | Visualization lag, inference tetap jalan |
-| Input queue full | Frame dropped (backpressure) | Normal behavior, tidak fatal |
-| RTSP disconnect | RTSPReader auto-reconnect loop | Built-in di `rtsp_reader.py` |
-| Gallery kosong | Matcher match selalu return `(False, None, 0.0)` | System tetap detect, tapi tidak match siapapun |
-| Semua SPG absent di semua kamera | OutletAggregator fire 1 alert per SPG | Alert tidak duplikat |
-| SPG re-entry setelah absent | Status reset ke PRESENT, alert bisa fire lagi | By design |
+FPS dashboard efektif kira-kira dibatasi oleh nilai paling kecil dari komponen di atas.
 
 ---
 
-## 9. Future Improvements
+## 7) Simulate and Preview
 
-| Priority | Improvement | Why |
-|---|---|---|
-| 🔴 High | Process supervisor (auto-restart crashed workers) | InferenceServer crash = system down |
-| 🔴 High | Gallery hot-reload (tanpa restart server) | Enrollment baru belum ter-pickup sampai restart |
-| 🟡 Medium | WebSocket push untuk dashboard (ganti polling) | Lebih responsive, kurang overhead |
-| 🟡 Medium | GPU batch inference (batch frames dari multiple cameras) | ~2x throughput pada GPU |
-| 🟢 Low | Database backend (SQLite/Postgres) untuk events | Scalability, query historical data |
-| 🟢 Low | Metrics export (Prometheus) | Monitoring infrastructure |
-| 🟢 Low | Liveness detection (anti-spoofing) | Security |
+### Simulate mode
+- `make simulate` -> `python -m src.commands.run_outlet --simulate --preview`
+- Source frame diambil dari `dev.video_files` pada config aktif.
+- Jika semua path video invalid, pipeline tidak punya source valid dan tidak ada output.
+
+### Preview window
+- `--preview` sekarang aktif: worker akan menampilkan `cv2.imshow` per kamera.
+- `--no-preview` tetap headless.
+- Preview ini berbeda dengan dashboard stream (file-based MJPEG).
+
+---
+
+## 8) Presence Rule (ANY-of-N)
+
+Untuk outlet multi-camera:
+- SPG dianggap `PRESENT` jika terlihat di salah satu kamera.
+- SPG dianggap `ABSENT` bila tidak terlihat di semua kamera lebih lama dari `presence.absent_seconds`.
+- Alert absence di-fire sekali per periode absence, lalu reset saat SPG muncul kembali.
+
+---
+
+## 9) Known Constraints
+
+1. `process_fps` tinggi tidak otomatis membuat dashboard 60 FPS.
+2. Menurunkan `process_fps` menurunkan densitas sampling waktu:
+   - aksi cepat bisa terlewat,
+   - delay deteksi meningkat.
+3. Menurunkan `process_fps` tidak menurunkan "kemampuan asli" CCTV; ini hanya rate pemrosesan di sisi aplikasi.
+4. Jika shared memory gagal, sistem fallback ke queue mode (lebih berat CPU karena serialization).
+
+---
+
+## 10) Recommended Tuning Order
+
+1. `recognition.threshold`
+2. `recognition.min_consecutive_hits`
+3. `presence.grace_seconds`
+4. `camera.process_fps`
+5. `inference.frame_skip`
+6. `runtime.preview_frame_save_interval_sec` + `dashboard.stream_frame_interval_sec` (jika fokus UI smoothness)
