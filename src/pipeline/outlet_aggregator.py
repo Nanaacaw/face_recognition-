@@ -45,11 +45,11 @@ class OutletAggregator:
         if ts > self.last_seen[spg_id]:
             self.last_seen[spg_id] = ts
             
-        # If they were absent, they are now PRESENT
-        if self.is_absent[spg_id]:
-            self.is_absent[spg_id] = False
-            self.alert_fired[spg_id] = False
-            # We could emit a SPG_GLOBAL_PRESENT event here if needed
+            # Only reset absence if this is new information
+            if self.is_absent[spg_id]:
+                self.is_absent[spg_id] = False
+                self.alert_fired[spg_id] = False
+                # We could emit a SPG_GLOBAL_PRESENT event here if needed
 
     def tick(self) -> List[Event]:
         """

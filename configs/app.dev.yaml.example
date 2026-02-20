@@ -49,6 +49,10 @@ inference:
   max_frame_height: 720  # Shared memory buffer size
   max_frame_width: 1280
 
+## Notification
+notification:
+  telegram_enabled: true
+
 ## Mode 3: Simulation (dev only, overrides outlet cameras with video files)
 dev:
   simulate: false

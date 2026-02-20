@@ -121,6 +121,7 @@ def main():
             model_name=getattr(cfg.recognition, "model_name", "buffalo_s"),
             execution_providers=getattr(cfg.recognition, "execution_providers", None),
             det_size=getattr(cfg.recognition, "det_size", (640, 640)),
+            enable_notifier=cfg.notification.telegram_enabled,
         )
         return
 

@@ -133,12 +133,13 @@ def worker_camera_capture(
                     label = f"{f['name']} ({f['similarity']:.2f})"
                     cv2.putText(frame, label, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-                # E. Save preview thumbnail (1x per second)
-                if now - last_frame_time > 1.0:
+                # E. Save preview thumbnail (5x per second)
+                if now - last_frame_time > 0.2:
                     try:
                         h, w = frame.shape[:2]
+                        # Resize for dashboard (width 640)
                         small = cv2.resize(frame, (640, int(h * 640 / w)))
-                        cv2.imwrite(preview_path, small)
+                        cv2.imwrite(preview_path, small, [cv2.IMWRITE_JPEG_QUALITY, 80])
                         last_frame_time = now
                     except: pass
 
@@ -313,9 +314,13 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     # Telegram
     load_dotenv()
     notifier = None
-    try:
-        notifier = TelegramNotifier.from_env()
-    except Exception: pass
+    if settings.notification.telegram_enabled:
+        try:
+            notifier = TelegramNotifier.from_env()
+        except Exception as e:
+            logger.warning(f"Telegram notifier disabled: {e}")
+    else:
+        logger.info("Telegram notification disabled in config.")
     
     logger.info("[Main] Centralized Loop active.")
     state_path = os.path.join(base_data_dir, "outlet_state.json")
@@ -364,7 +369,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             for al in alerts:
                 reason = al.details.get("reason", "unknown")
                 spg = al.name or al.spg_id
-                txt = f"⚠️ ABSENCE: {spg} ({reason})"
+                logger.info(f"[Alert] Sending Telegram: ABSENCE {spg} ({reason})")
                 if notifier:
                     try: notifier.send_message(txt)
                     except: pass

@@ -65,6 +65,10 @@ class DevConfig(BaseModel):
     video_files: list[str] = []
 
 
+class NotificationConfig(BaseModel):
+    telegram_enabled: bool = True
+
+
 class AppConfig(BaseModel):
     camera: CameraConfig
     recognition: RecognitionConfig
@@ -73,6 +77,7 @@ class AppConfig(BaseModel):
     target: TargetConfig = TargetConfig()
     outlet: OutletConfig | None = None
     inference: InferenceConfig = InferenceConfig()
+    notification: NotificationConfig = NotificationConfig()
     dev: DevConfig = DevConfig()
 
 def load_settings(config_path: str | None = None) -> AppConfig:

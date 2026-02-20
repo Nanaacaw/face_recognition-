@@ -81,7 +81,7 @@ def run_webcam_recognition(
             event.details["snapshot_path"] = snap_path
 
         event_store.append(event)
-        logger.info(f"[EVENT] {event.model_dump()}")
+        logger.info(f"[EVENT] {event.event_type} - {event.spg_id}")
 
         if notifier is not None and event.event_type == "ABSENT_ALERT_FIRED":
             seconds = event.details.get("seconds_since_last_seen", "?")
@@ -169,12 +169,13 @@ def run_webcam_recognition(
                         2,
                     )
 
-                # Save latest camera frame for dashboard preview (1x per second)
-                if now - last_frame_time > 1.0:
+                # Save latest camera frame for dashboard preview (5x per second)
+                if now - last_frame_time > 0.2:
                     try:
                         h, w = frame.shape[:2]
+                        # Resize for dashboard (width 640)
                         small = cv2.resize(frame, (640, int(h * 640 / w)))
-                        cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, 80])
                         last_frame_time = now
                     except Exception:
                         pass
