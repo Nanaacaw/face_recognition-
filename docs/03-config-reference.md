@@ -295,7 +295,22 @@ Never tune everything at once.
 
 ---
 
-# 10) Deployment
+# 10) Notification
+
+## notification.telegram_enabled
+Type: boolean
+Default: true
+
+Description:
+Kill-switch untuk notifikasi Telegram.
+- `true`: Kirim alert via Telegram (butuh env vars).
+- `false`: Silent mode (hanya log ke terminal/file).
+
+Berguna untuk debugging atau saat env vars belum disiapkan.
+
+---
+
+# 11) Deployment
 
 ## Centralized Mode (Production)
 
