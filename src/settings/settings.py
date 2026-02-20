@@ -53,6 +53,13 @@ class OutletConfig(BaseModel):
     target_spg_ids: list[str] = []
 
 
+class InferenceConfig(BaseModel):
+    """Settings for the centralized Inference Server."""
+    frame_skip: int = 0  # Skip N frames between inferences (0 = process every frame)
+    max_frame_height: int = 720  # Max frame height for shared memory buffer
+    max_frame_width: int = 1280  # Max frame width for shared memory buffer
+
+
 class DevConfig(BaseModel):
     simulate: bool = False
     video_files: list[str] = []
@@ -65,6 +72,7 @@ class AppConfig(BaseModel):
     storage: StorageConfig
     target: TargetConfig = TargetConfig()
     outlet: OutletConfig | None = None
+    inference: InferenceConfig = InferenceConfig()
     dev: DevConfig = DevConfig()
 
 def load_settings(config_path: str | None = None) -> AppConfig:

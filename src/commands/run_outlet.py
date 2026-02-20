@@ -1,284 +1,397 @@
+from __future__ import annotations
+
 import multiprocessing
 import time
 import os
 import json
 import sys
+import queue
+import cv2
 
-from src.commands.run_webcam import run_webcam_recognition
+from src.pipeline.inference_server import InferenceServer
+from src.pipeline.shared_frame_buffer import SharedFrameBuffer
 from src.pipeline.outlet_aggregator import OutletAggregator
 from src.domain.events import Event
 from src.notification.telegram_notifier import TelegramNotifier
+from src.pipeline.webcam_reader import WebcamReader
+from src.pipeline.rtsp_reader import RTSPReader
+from src.storage.event_store import EventStore
+from src.storage.snapshot_store import SnapshotStore
 from src.settings.settings import load_settings
 from dotenv import load_dotenv
-
 
 from src.settings.logger import logger
 from src.storage.snapshot_cleaner import SnapshotCleaner
 
-def worker_camera_process(config_common, camera_id, source_url, data_dir):
+
+# --- LIGHTWEIGHT CAMERA WORKER ---
+def worker_camera_capture(
+    camera_id: str, 
+    source_url: str, 
+    process_fps: int,
+    loop_video: bool,
+    input_queue: multiprocessing.Queue,
+    feedback_queue: multiprocessing.Queue,
+    data_dir: str,
+    outlet_id: str,
+    shm_name: str | None = None,
+    shm_max_h: int = 720,
+    shm_max_w: int = 1280,
+    shm_lock: multiprocessing.Lock | None = None,
+):
     """
-    Runs a single camera pipeline in a separate process.
-    source_url can be an RTSP URL, a local video file path, or "0"/"1" for webcam.
+    Lightweight camera capture process:
+    1. Reads frame from RTSP/Webcam/File
+    2. Writes frame to Shared Memory (zero-copy) or Queue (fallback)
+    3. Sends lightweight metadata to input_queue
+    4. Reads inference results from feedback_queue -> Draws visualization
+    5. Saves preview thumbnail for dashboard
     """
-    logger.info(f"[Worker {camera_id}] Starting with source: {source_url}")
+    logger.info(f"[CamWorker {camera_id}] Starting capture process...")
     
     os.makedirs(data_dir, exist_ok=True)
-
-    camera_source = "rtsp"
-    rtsp_url = source_url
-    webcam_index = 0
-
+    
+    # Setup Reader
     if source_url == "webcam" or (isinstance(source_url, str) and source_url.isdigit()):
-        camera_source = "webcam"
-        webcam_index = int(source_url) if source_url.isdigit() else 0
-        rtsp_url = None
-        logger.info(f"[Worker {camera_id}] Mode: WEBCAM (index={webcam_index})")
+        idx = int(source_url) if source_url.isdigit() else 0
+        reader = WebcamReader(idx, process_fps)
     else:
-        logger.info(f"[Worker {camera_id}] Mode: RTSP/FILE ({source_url})")
+        reader = RTSPReader(source_url, process_fps)
+        reader.set_loop(loop_video)
+        
+    reader.start()
+    
+    # Attach to Shared Memory (if available)
+    shm_buf = None
+    if shm_name:
+        try:
+            shm_buf = SharedFrameBuffer.attach(shm_name, shm_max_h, shm_max_w, shm_lock)
+            logger.info(f"[CamWorker {camera_id}] Using shared memory.")
+        except Exception as e:
+            logger.warning(f"[CamWorker {camera_id}] Shared memory failed, falling back to queue: {e}")
+    
+    frame_id = 0
+    last_frame_time = 0
+    preview_path = os.path.join(data_dir, "snapshots", "latest_frame.jpg")
+    os.makedirs(os.path.dirname(preview_path), exist_ok=True)
+
+    # State for drawing inference results
+    latest_faces = []
 
     try:
-        run_webcam_recognition(
-            data_dir=data_dir,
-            webcam_index=webcam_index, 
-            process_fps=config_common['process_fps'],
-            threshold=config_common['threshold'],
-            grace_seconds=config_common['grace_seconds'],
-            absent_seconds=config_common['absent_seconds'],
-            outlet_id=config_common['outlet_id'],
-            camera_id=camera_id,
-            target_spg_ids=config_common['target_spg_ids'],
-            camera_source=camera_source,
-            rtsp_url=rtsp_url,
-            preview=config_common['preview'], 
-            loop_video=config_common.get('loop_video', False),
-            gallery_dir="data", 
-            enable_notifier=False,
-            model_name=config_common['model_name'],
-            execution_providers=config_common['execution_providers'],
-            det_size=config_common['det_size'],
-        )
+        while True:
+            # A. Read Frame
+            frame = reader.read_throttled()
+            now = time.time()
+            
+            # B. Check for New Inference Results (Non-blocking drain)
+            try:
+                while True:
+                    res = feedback_queue.get_nowait()
+                    if res['camera_id'] == camera_id:
+                        latest_faces = res['faces']
+            except (queue.Empty, AttributeError):
+                pass
+            
+            if frame is not None:
+                frame_id += 1
+                
+                # C. Send to Inference
+                try:
+                    if shm_buf:
+                        # Shared Memory Mode: resize if needed, then write
+                        inf_frame = frame
+                        h, w = inf_frame.shape[:2]
+                        bbox_scale = 1.0
+                        if h > shm_max_h or w > shm_max_w:
+                            bbox_scale = min(shm_max_h / h, shm_max_w / w)
+                            inf_frame = cv2.resize(inf_frame, (int(w * bbox_scale), int(h * bbox_scale)))
+                        shm_buf.write(inf_frame, frame_id, now)
+                        input_queue.put((camera_id, frame_id, now), timeout=0.1)
+                    else:
+                        # Queue Mode (fallback): send frame via queue
+                        bbox_scale = 1.0
+                        input_queue.put((camera_id, frame_id, frame, now), timeout=0.1)
+                except queue.Full:
+                    pass  # Backpressure: drop frame
+                except Exception:
+                    pass
+
+                # D. Draw Visualization (async, 1-2 frames behind is acceptable)
+                # Bbox coords are from the resized frame, scale back to original
+                inv_scale = 1.0 / bbox_scale if bbox_scale > 0 else 1.0
+                for f in latest_faces:
+                    bbox = f['bbox']
+                    x1 = int(bbox[0] * inv_scale)
+                    y1 = int(bbox[1] * inv_scale)
+                    x2 = int(bbox[2] * inv_scale)
+                    y2 = int(bbox[3] * inv_scale)
+                    
+                    color = (0, 255, 0) if f['matched'] else (0, 0, 255)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    
+                    label = f"{f['name']} ({f['similarity']:.2f})"
+                    cv2.putText(frame, label, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                # E. Save preview thumbnail (1x per second)
+                if now - last_frame_time > 1.0:
+                    try:
+                        h, w = frame.shape[:2]
+                        small = cv2.resize(frame, (640, int(h * 640 / w)))
+                        cv2.imwrite(preview_path, small)
+                        last_frame_time = now
+                    except: pass
+
+            else:
+                 time.sleep(0.05)
+
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        logger.error(f"[Worker {camera_id}] Failed: {e}", exc_info=True)
+        logger.error(f"[CamWorker {camera_id}] Error: {e}")
+    finally:
+        if shm_buf:
+            shm_buf.close()
+        reader.stop()
+        logger.info(f"[CamWorker {camera_id}] Stopped.")
 
 
 def run_outlet(preview: bool = False, force_simulate: bool = False):
     """
-    Main multi-camera outlet runner.
+    Main Runner: Centralized Inference (Sidecar Pattern)
     
-    Modes:
-      --simulate flag (or force_simulate=True) → always use video files
-      Otherwise → use outlet.cameras RTSP URLs from config
+    Architecture:
+      Camera Workers → SharedMemory + metadata Queue → InferenceServer (1 model)
+                                                              ↓
+      Main Process ← output_queue ← InferenceServer
+        ├→ feedback_queues[cam_id] → Workers (visualization)
+        └→ OutletAggregator → Events → Alerts
     """
     settings = load_settings()
     
-    # Resolve outlet config
     if settings.outlet is None:
-        logger.error("No 'outlet' section found in config. Cannot run multi-camera mode.")
+        logger.error("No 'outlet' section found.")
         sys.exit(1)
-    
+        
     outlet = settings.outlet
     outlet_id = outlet.id
     target_spg_ids = outlet.target_spg_ids
     
-    logger.info(f"=== Outlet Started: {outlet_id} ({outlet.name}) ===")
-    logger.info(f"[Config] Target SPG IDs: {target_spg_ids}")
+    logger.info(f"=== Outlet Started: {outlet_id} (Centralized Mode) ===")
     
     use_simulation = force_simulate or settings.dev.simulate
-    camera_sources = []  # List of (camera_id, source_url)
+    camera_sources = [] 
     loop_video = False
     
     if use_simulation and settings.dev.video_files:
         logger.info(f"[Mode] SIMULATION — using {len(settings.dev.video_files)} video file(s)")
         loop_video = True
         for i, vf in enumerate(settings.dev.video_files):
-            if not os.path.exists(vf):
-                logger.warning(f"Video file not found: {vf}")
-                continue
-            cam_id = f"cam_{i+1:02d}"
-            camera_sources.append((cam_id, vf))
+            if not os.path.exists(vf): continue
+            camera_sources.append((f"cam_{i+1:02d}", vf))
     else:
         logger.info(f"[Mode] PRODUCTION — using {len(outlet.cameras)} RTSP camera(s)")
         for cam in outlet.cameras:
             camera_sources.append((cam.id, cam.rtsp_url))
-    
+            
     if not camera_sources:
-        logger.error("No valid camera sources. Check config.")
+        logger.error("No valid cameras.")
         sys.exit(1)
-    
-    config_common = {
-        'process_fps': settings.camera.process_fps,
-        'threshold': settings.recognition.threshold,
-        'grace_seconds': settings.presence.grace_seconds,
-        'absent_seconds': settings.presence.absent_seconds,
-        'outlet_id': outlet_id,
-        'target_spg_ids': target_spg_ids,
-        'preview': preview,
-        'loop_video': loop_video,
-        'model_name': settings.recognition.model_name,
-        'execution_providers': settings.recognition.execution_providers,
-        'det_size': settings.recognition.det_size,
-    }
 
+    # Directories
     base_data_dir = os.path.join(settings.storage.data_dir, "sim_output")
     os.makedirs(base_data_dir, exist_ok=True)
     
     old_state = os.path.join(base_data_dir, "outlet_state.json")
-    if os.path.exists(old_state):
-        os.remove(old_state)
-        logger.info("[Cleanup] Removed old outlet_state.json")
+    if os.path.exists(old_state): os.remove(old_state)
     
-    # Run Snapshot Cleaner (Startup)
     try:
-        cleaner = SnapshotCleaner(
-            data_dir=settings.storage.data_dir,
-            retention_days=settings.storage.snapshot_retention_days
-        )
-        cleaner.clean()
-    except Exception as e:
-        logger.error(f"[Cleanup] Snapshot cleaning failed: {e}")
+        SnapshotCleaner(settings.storage.data_dir, 3).clean()
+    except: pass
+
+    # IPC
+    input_queue = multiprocessing.Queue(maxsize=10) 
+    output_queue = multiprocessing.Queue()
     
-    # 1. Start Worker Processes
-    processes = []
-    cam_data_dirs = []
+    # Feedback Queues (Main → Worker, for visualization)
+    worker_feedback_queues = {}
+    for cam_id, _ in camera_sources:
+        worker_feedback_queues[cam_id] = multiprocessing.Queue(maxsize=5)
+
+    # Shared Memory Buffers (per camera)
+    max_h = settings.inference.max_frame_height
+    max_w = settings.inference.max_frame_width
+    frame_skip = settings.inference.frame_skip
     
-    for cam_id, source_url in camera_sources:
-        d_dir = os.path.join(base_data_dir, cam_id)
-        cam_data_dirs.append(d_dir)
+    shared_buffers = {}
+    shared_locks = {}
+    shared_buffer_configs = {}
+    
+    for cam_id, _ in camera_sources:
+        lock = multiprocessing.Lock()
+        try:
+            buf = SharedFrameBuffer.create(cam_id, max_h, max_w, lock)
+            shared_buffers[cam_id] = buf
+            shared_locks[cam_id] = lock
+            shared_buffer_configs[cam_id] = (cam_id, max_h, max_w, lock)
+        except Exception as e:
+            logger.warning(f"[SharedMem] Failed to create buffer for {cam_id}: {e}. Using queue fallback.")
+
+    use_shm = len(shared_buffers) == len(camera_sources)
+    if use_shm:
+        logger.info(f"[SharedMem] Created {len(shared_buffers)} buffers ({max_h}x{max_w})")
+    else:
+        # Cleanup partial buffers
+        for buf in shared_buffers.values():
+            buf.close()
+            buf.unlink()
+        shared_buffers.clear()
+        shared_buffer_configs.clear()
+        logger.info("[SharedMem] Disabled, using queue mode.")
+
+    logger.info(f"[Config] frame_skip={frame_skip}")
+
+    # Start Inference Server
+    server = InferenceServer(
+        input_queue=input_queue,
+        output_queue=output_queue,
+        model_name=settings.recognition.model_name,
+        execution_providers=settings.recognition.execution_providers,
+        det_size=tuple(settings.recognition.det_size),
+        threshold=settings.recognition.threshold,
+        gallery_path=settings.storage.data_dir,
+        shared_buffers=shared_buffer_configs if use_shm else None,
+        frame_skip=frame_skip,
+    )
+    
+    p_server = multiprocessing.Process(target=server.run)
+    p_server.daemon = True
+    p_server.start()
+    
+    # Start Camera Workers
+    processes = [p_server]
+    cam_dirs = {}
+    
+    for cam_id, src in camera_sources:
+        d = os.path.join(base_data_dir, cam_id)
+        cam_dirs[cam_id] = d
         
-        p = multiprocessing.Process(
-            target=worker_camera_process,
-            args=(config_common, cam_id, source_url, d_dir)
+        worker_kwargs = dict(
+            camera_id=cam_id,
+            source_url=src,
+            process_fps=settings.camera.process_fps,
+            loop_video=loop_video,
+            input_queue=input_queue,
+            feedback_queue=worker_feedback_queues[cam_id],
+            data_dir=d,
+            outlet_id=outlet_id,
         )
+        
+        if use_shm:
+            worker_kwargs.update(
+                shm_name=cam_id,
+                shm_max_h=max_h,
+                shm_max_w=max_w,
+                shm_lock=shared_locks[cam_id],
+            )
+        
+        p = multiprocessing.Process(target=worker_camera_capture, kwargs=worker_kwargs)
         p.daemon = True
         p.start()
         processes.append(p)
-        logger.info(f"[Started] {cam_id} -> {source_url}")
+        logger.info(f"[Started] {cam_id} -> {src}")
 
-    # 2. Setup Aggregator
+    # Aggregator
     aggregator = OutletAggregator(
         outlet_id, 
-        absent_seconds=config_common['absent_seconds'],
+        absent_seconds=settings.presence.absent_seconds,
         target_spg_ids=target_spg_ids
     )
     
-    # 3. Setup Telegram
+    event_stores = {cid: EventStore(d) for cid, d in cam_dirs.items()}
+    
+    # Telegram
     load_dotenv()
-    
-    token = os.getenv("SPG_TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("SPG_TELEGRAM_CHAT_ID")
-    token_status = "OK" if token else "MISSING"
-    chat_status = "OK" if chat_id else "MISSING"
-    logger.info(f"[Telegram] Token: {token_status}, Chat-ID: {chat_status}")
-    
     notifier = None
     try:
         notifier = TelegramNotifier.from_env()
-        logger.info("[Telegram] Notifier ready.")
-    except Exception as e:
-        logger.warning(f"[Telegram] Disabled: {e}")
-
-    # 4. Main Aggregator Loop
-    logger.info(f"[Aggregator] Monitoring {len(camera_sources)} cameras...")
+    except Exception: pass
     
-    event_files = [os.path.join(d, "events.jsonl") for d in cam_data_dirs]
-    file_pointers = {}
+    logger.info("[Main] Centralized Loop active.")
     state_path = os.path.join(base_data_dir, "outlet_state.json")
-
+    
     try:
         while True:
+            # Drain output queue
             events_batch = []
-            
-            for ef in event_files:
-                if not os.path.exists(ef):
-                    continue
-                
-                if ef not in file_pointers:
-                    f = open(ef, 'r')
-                    f.seek(0, 2)
-                    file_pointers[ef] = f
-                
-                f = file_pointers[ef]
-                line = f.readline()
-                while line:
-                    if line.strip():
+            for _ in range(50):
+                try:
+                    res = output_queue.get_nowait()
+                    cid = res['camera_id']
+                    
+                    # 1. Dispatch copy to Worker for Visualization
+                    if cid in worker_feedback_queues:
                         try:
-                            data = json.loads(line)
-                            ev = Event(**data)
+                            worker_feedback_queues[cid].put_nowait(res)
+                        except queue.Full:
+                            pass  # Viz lag is fine
+
+                    # 2. Process Events
+                    for f in res['faces']:
+                        if f['matched'] and f['spg_id'] in target_spg_ids:
+                            ev = Event(
+                                event_type="SPG_SEEN",
+                                outlet_id=outlet_id,
+                                camera_id=cid,
+                                spg_id=f['spg_id'],
+                                name=f['name'],
+                                similarity=f['similarity'],
+                                ts=res['timestamp'],
+                                details={"frame_id": res['frame_id']}
+                            )
+                            if cid in event_stores:
+                                event_stores[cid].append(ev)
                             events_batch.append(ev)
-                        except Exception:
-                            logger.warning(f"Failed to parse event line from {ef}", exc_info=False)
-                    line = f.readline()
-            
+
+                except queue.Empty:
+                    break
+
             if events_batch:
                 aggregator.ingest_events(events_batch)
             
             alerts = aggregator.tick()
-            for al in alerts:
-
-                snap_path = None
-                for d in cam_data_dirs:
-                    p = os.path.join(d, "snapshots", f"latest_{al.spg_id}.jpg")
-                    if os.path.exists(p):
-                        snap_path = p
-                        break
-                
-                # Build alert message
-                reason = al.details.get("reason", "global_absence")
-                duration = al.details.get("seconds_since_last_seen") or al.details.get("seconds_since_startup", "?")
-                
-                title = "⚠️ **SPG ABSENCE DETECTED** ⚠️"
-                if reason == "startup_absence_never_arrived":
-                     title = "🚫 **PERSONNEL NEVER ARRIVED** 🚫"
-                
-                spg_name = al.name or "Unknown"
-                timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(al.ts))
-                
-                text = (
-                    f"{title}\n\n"
-                    f"📍 **Outlet:** {al.outlet_id}\n"
-                    f"👤 **Personnel:** {spg_name} ({al.spg_id})\n"
-                    f"⏱️ **Duration:** {duration}s\n"
-                    f"🕒 **Time:** {timestamp}\n"
-                )    
-                # logger.warning(f"ALERT FIRED | Outlet: {al.outlet_id} | SPG: {al.spg_id} | Reason: {reason}")
-                
-                if notifier:
-                    try:
-                        if snap_path:
-                            notifier.send_photo(snap_path, caption=text)
-                        else:
-                            notifier.send_message(text)
-                    except Exception as ex:
-                        logger.error(f"[Telegram] Failed to send alert: {ex}")
             
-            # Dump state for dashboard
+            for al in alerts:
+                reason = al.details.get("reason", "unknown")
+                spg = al.name or al.spg_id
+                txt = f"⚠️ ABSENCE: {spg} ({reason})"
+                if notifier:
+                    try: notifier.send_message(txt)
+                    except: pass
+            
             aggregator.dump_state(state_path)
             
-            # Check worker health
-            if not any(p.is_alive() for p in processes):
-                logger.info("All workers finished/died.")
-                break          
+            if not p_server.is_alive():
+                logger.error("Inference Died")
+                break
                 
-            time.sleep(0.1)
+            time.sleep(0.05)
 
     except KeyboardInterrupt:
         logger.info("Stopping...")
-        for p in processes:
-            p.terminate()
-
+    finally:
+        for p in processes: p.terminate()
+        # Cleanup shared memory
+        for buf in shared_buffers.values():
+            buf.close()
+            buf.unlink()
 
 if __name__ == "__main__":
     import argparse
-
-    parser = argparse.ArgumentParser(description="Run Multi-Camera Outlet Monitoring")
-    parser.add_argument("--preview", action="store_true", help="Show video preview windows")
-    parser.add_argument("--no-preview", action="store_true", help="Disable video preview (for servers)")
-    parser.add_argument("--simulate", action="store_true", help="Force simulation mode (use video files)")
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--no-preview", action="store_true")
+    parser.add_argument("--simulate", action="store_true")
     args = parser.parse_args()
     
-    show_preview = args.preview and not args.no_preview
-    
-    run_outlet(preview=show_preview, force_simulate=args.simulate)
+    run_outlet(preview=(args.preview and not args.no_preview), force_simulate=args.simulate)
