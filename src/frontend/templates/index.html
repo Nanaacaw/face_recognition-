@@ -21,6 +21,11 @@
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
         }
+
+        .modal-backdrop {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+        }
     </style>
 </head>
 
@@ -93,10 +98,14 @@
             </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <template x-for="cam in cameras" :key="cam.id">
-                    <div class="bg-black rounded-lg overflow-hidden shadow-lg relative aspect-video group">
+                    <div class="bg-black rounded-lg overflow-hidden shadow-lg relative aspect-video group cursor-pointer"
+                        @click="openCameraModal(cam)">
                         <img :src="cam.url" class="w-full h-full object-cover" alt="Camera Feed">
-                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                        <div
+                            class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex justify-between items-center">
                             <span class="text-white text-sm font-mono" x-text="cam.id"></span>
+                            <span class="text-white/60 text-xs opacity-0 group-hover:opacity-100 transition-opacity">🔍
+                                Click to enlarge</span>
                         </div>
                     </div>
                 </template>
@@ -198,6 +207,31 @@
         </div>
     </main>
 
+    <!-- Camera Enlarge Modal -->
+    <div x-show="cameraModal.open" x-cloak class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
+        @click.self="closeCameraModal()" @keydown.escape.window="closeCameraModal()"
+        x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+
+        <div class="relative w-full max-w-5xl mx-4">
+            <!-- Header -->
+            <div class="flex justify-between items-center mb-3">
+                <div class="flex items-center space-x-3">
+                    <span class="text-white text-lg font-bold font-mono" x-text="cameraModal.cam?.id"></span>
+                    <span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium">LIVE</span>
+                </div>
+                <button @click="closeCameraModal()"
+                    class="text-white/70 hover:text-white transition-colors text-2xl leading-none">&times;</button>
+            </div>
+            <!-- Stream -->
+            <div class="bg-black rounded-lg overflow-hidden shadow-2xl">
+                <img x-show="cameraModal.open" :src="cameraModal.cam?.url" class="w-full h-auto"
+                    alt="Camera Feed Enlarged">
+            </div>
+        </div>
+    </div>
+
     <script>
         function dashboard() {
             return {
@@ -207,6 +241,7 @@
                 systemStatus: 'OFFLINE',
                 lastUpdate: '-',
                 showCameras: false,
+                cameraModal: { open: false, cam: null },
 
                 init() {
                     this.fetchData();
@@ -250,6 +285,14 @@
 
                 toggleCameras() {
                     this.showCameras = !this.showCameras;
+                },
+
+                openCameraModal(cam) {
+                    this.cameraModal = { open: true, cam: cam };
+                },
+
+                closeCameraModal() {
+                    this.cameraModal = { open: false, cam: null };
                 },
 
                 get sortedSpgs() {

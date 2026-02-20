@@ -131,11 +131,12 @@ async def api_cameras():
     return cams
 
 
-def mjpeg_generator(cam_id):
-    """Yields MJPEG stream from latest_frame.jpg"""
+async def mjpeg_generator(cam_id: str, request: Request):
+    """Yields MJPEG stream from latest_frame.jpg. Stops when client disconnects."""
+    import asyncio
     file_path = os.path.join(DATA_DIR, cam_id, "snapshots", "latest_frame.jpg")
     
-    while True:
+    while not await request.is_disconnected():
         if os.path.exists(file_path):
             try:
                 with open(file_path, "rb") as f:
@@ -144,16 +145,16 @@ def mjpeg_generator(cam_id):
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
                 
-                time.sleep(0.2)
+                await asyncio.sleep(0.2)
             except Exception:
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
         else:
-            time.sleep(1.0)
+            await asyncio.sleep(1.0)
 
 @app.get("/stream/{cam_id}")
-async def stream_feed(cam_id: str):
+async def stream_feed(cam_id: str, request: Request):
     return StreamingResponse(
-        mjpeg_generator(cam_id),
+        mjpeg_generator(cam_id, request),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
