@@ -129,7 +129,6 @@ def run_webcam_recognition(
 
     last_snapshot_times = {}
     last_frame_time = 0
-    # Path for latest camera frame (for dashboard preview)
     frame_path = os.path.join(data_dir, "snapshots", "latest_frame.jpg")
 
     try:
@@ -154,8 +153,7 @@ def run_webcam_recognition(
                         continue
 
                     seen_this_frame.add(spg_id)
-                    
-                    # Throttled snapshot saving (max 1x per second)
+
                     last_save = last_snapshot_times.get(spg_id, 0)
                     if now - last_save > 1.0:
                         snapshot_store.save_latest_face(spg_id, frame)
@@ -195,8 +193,6 @@ def run_webcam_recognition(
                     except Exception:
                         pass
 
-                # Only run local absence checks if NOT in multi-camera worker mode.
-                # In multi-camera mode, the global OutletAggregator handles absence detection.
                 if enable_notifier:
                     for e in engine.tick(target_spg_ids=target_spg_ids, ts=now):
                         if e.event_type == "ABSENT_ALERT_FIRED":

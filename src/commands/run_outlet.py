@@ -21,7 +21,7 @@ from src.settings.logger import logger
 from src.storage.snapshot_cleaner import SnapshotCleaner
 
 
-# --- LIGHTWEIGHT CAMERA WORKER ---
+# LIGHTWEIGHT CAMERA WORKER
 def worker_camera_capture(
     camera_id: str,
     source_url: str,
@@ -52,7 +52,6 @@ def worker_camera_capture(
     
     os.makedirs(data_dir, exist_ok=True)
     
-    # Setup Reader
     if source_url == "webcam" or (isinstance(source_url, str) and source_url.isdigit()):
         idx = int(source_url) if source_url.isdigit() else 0
         reader = WebcamReader(idx, process_fps)
@@ -76,16 +75,13 @@ def worker_camera_capture(
     preview_path = os.path.join(data_dir, "snapshots", "latest_frame.jpg")
     os.makedirs(os.path.dirname(preview_path), exist_ok=True)
 
-    # State for drawing inference results
     latest_faces = []
 
     try:
         while True:
-            # A. Read Frame
             frame = reader.read_throttled()
             now = time.time()
             
-            # B. Check for New Inference Results (Non-blocking drain)
             try:
                 while True:
                     res = feedback_queue.get_nowait()
@@ -97,10 +93,8 @@ def worker_camera_capture(
             if frame is not None:
                 frame_id += 1
                 
-                # C. Send to Inference
                 try:
                     if shm_buf:
-                        # Shared Memory Mode: resize if needed, then write
                         inf_frame = frame
                         h, w = inf_frame.shape[:2]
                         bbox_scale = 1.0
@@ -110,16 +104,13 @@ def worker_camera_capture(
                         shm_buf.write(inf_frame, frame_id, now)
                         input_queue.put((camera_id, frame_id, now), timeout=0.1)
                     else:
-                        # Queue Mode (fallback): send frame via queue
                         bbox_scale = 1.0
                         input_queue.put((camera_id, frame_id, frame, now), timeout=0.1)
                 except queue.Full:
-                    pass  # Backpressure: drop frame
+                    pass
                 except Exception:
                     pass
 
-                # D. Draw Visualization (async, 1-2 frames behind is acceptable)
-                # Bbox coords are from the resized frame, scale back to original
                 inv_scale = 1.0 / bbox_scale if bbox_scale > 0 else 1.0
                 for f in latest_faces:
                     bbox = f['bbox']
@@ -134,7 +125,6 @@ def worker_camera_capture(
                     label = f"{f['name']} ({f['similarity']:.2f})"
                     cv2.putText(frame, label, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-                # E. Save preview thumbnail (5x per second)
                 if now - last_frame_time > preview_frame_save_interval_sec:
                     try:
                         h, w = frame.shape[:2]
@@ -217,7 +207,6 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     input_queue = multiprocessing.Queue(maxsize=10) 
     output_queue = multiprocessing.Queue()
     
-    # Feedback Queues (Main → Worker, for visualization)
     worker_feedback_queues = {}
     for cam_id, _ in camera_sources:
         worker_feedback_queues[cam_id] = multiprocessing.Queue(maxsize=5)
@@ -347,14 +336,12 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                     res = output_queue.get_nowait()
                     cid = res['camera_id']
                     
-                    # 1. Dispatch copy to Worker for Visualization
                     if cid in worker_feedback_queues:
                         try:
                             worker_feedback_queues[cid].put_nowait(res)
                         except queue.Full:
-                            pass  # Viz lag is fine
+                            pass
 
-                    # 2. Process Events
                     for f in res['faces']:
                         if f['matched'] and f['spg_id'] in target_spg_ids:
                             ev = Event(
@@ -409,7 +396,6 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         logger.info("Stopping...")
     finally:
         for p in processes: p.terminate()
-        # Cleanup shared memory
         for buf in shared_buffers.values():
             buf.close()
             buf.unlink()
