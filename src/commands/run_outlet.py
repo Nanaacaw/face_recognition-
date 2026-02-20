@@ -154,7 +154,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         p.daemon = True
         p.start()
         processes.append(p)
-        logger.info(f"[Started] {cam_id} → {source_url}")
+        logger.info(f"[Started] {cam_id} -> {source_url}")
 
     # 2. Setup Aggregator
     aggregator = OutletAggregator(
