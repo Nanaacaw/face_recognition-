@@ -1,0 +1,57 @@
+## Mode 1: Single Webcam (for local testing via run_webcam)
+camera:
+  source: webcam
+  webcam_index: 0
+  rtsp_url: null
+  process_fps: 5
+  preview: true
+
+target:
+  spg_ids: ["001", "002", "003", "004"]
+  outlet_id: "outlet_test"
+  camera_id: "webcam_01"
+
+## Shared Settings
+recognition:
+  threshold: 0.40
+  min_consecutive_hits: 2
+  model_name: "buffalo_l"
+  execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  det_size: [640, 640]
+
+presence:
+  grace_seconds: 3 # dev: 3, production: 20
+  absent_seconds: 10 # dev: 10, production: 300 (5 min)
+
+storage:
+  data_dir: "./data"
+  snapshot_enabled: true
+  snapshot_retention_days: 14
+
+## Mode 2: Multi-Camera Outlet (for run_outlet)
+outlet:
+  id: "outlet_mkg"
+  name: "Outlet Mall Kelapa Gading"
+  cameras:
+    - id: "cam_01"
+      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/101"
+    - id: "cam_02"
+      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/201"
+    - id: "cam_03"
+      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/301"
+    - id: "cam_04"
+      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/401"
+  target_spg_ids: ["001", "002", "003", "004"]
+
+## Inference Server (Centralized Mode)
+inference:
+  frame_skip: 0          # Skip N frames between inferences (0 = every frame, 2 = process 1 in 3)
+  max_frame_height: 720  # Shared memory buffer size
+  max_frame_width: 1280
+
+## Mode 3: Simulation (dev only, overrides outlet cameras with video files)
+dev:
+  simulate: false
+  video_files:
+    - "sample_video/testing_kantor.mp4"
+    - "sample_video/testing_kantor.mp4"

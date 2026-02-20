@@ -203,70 +203,88 @@ Behavior difference must come from config.
 
 Architecture must allow these without rewrite.
 
-## 7) Multi-Camera Outlet Architecture (v2)
+## 7) Multi-Camera Outlet Architecture (v2 — Centralized Inference)
+
 ### 7.1 Motivation
-Dalam satu outlet dapat terdapat lebih dari satu kamera (2–5 CCTV).
+Dalam satu outlet dapat terdapat lebih dari satu kamera (2–6 CCTV).
 SPG dianggap PRESENT jika terdeteksi pada salah satu kamera (ANY-of-N rule).
 
-Sistem harus mendukung:
-- Jumlah kamera berbeda per outlet
-- Multi-SPG per outlet
-- Alert hanya 1x per SPG per outlet
+**Problem**: N worker = N model load (RAM & CPU heavy).
+**Solution**: Sidecar Pattern — 1 InferenceServer + N lightweight Camera Readers.
 
-### 7.2 Updated High-Level Flow
-Per Outlet
-Worker (Camera 01)  ┐
-Worker (Camera 02)  ├──> OutletAggregator
-Worker (Camera 03)  │        ↓
-Worker (Camera 04)  ┘    PresenceEngine (Global)
-                            ↓
-                        EventDispatcher
-                            ↓
-                        TelegramNotifier
+### 7.2 Architecture Flow
+
+```
+Camera Worker A ──┐                    SharedMemory (zero-copy)
+Camera Worker B ──┼──→ input_queue ──→ InferenceServer (1 model load)
+Camera Worker C ──┘    (metadata)              │
+                                               ▼
+                                         output_queue
+                                               │
+                                      Main Process (Router)
+                                       ├→ feedback_queues[cam_id] → Workers (visualization)
+                                       └→ OutletAggregator → Events → Alerts → Telegram
+```
 
 ### 7.3 Camera Worker Responsibilities
 
 Worker (per camera) bertugas:
-- Capture frame (webcam / RTSP)
-- Detect face
-- Extract embedding
-- Match to gallery
-- Emit SPG_SEEN events
-
-Write events to:
-- data_camXX/events.jsonl
+- Capture frame (webcam / RTSP / video file)
+- Write frame to SharedMemory (zero-copy)
+- Send lightweight metadata tuple to input_queue
+- Receive inference results via feedback_queue → Draw bbox on frame
+- Save preview thumbnail for dashboard (1x/sec)
 
 Worker MUST NOT:
-- Fire ABSENT alert
-- Send Telegram alert
-- Decide global presence
+- Load ML model
+- Run face detection or embedding extraction
+- Fire absence alerts
+- Send Telegram
 
-### 7.4 Outlet Aggregator Responsibilities
-Aggregator (per outlet):
-- Read events from all camera workers
-Compute:
-- last_seen_global(spg) = max(last_seen_cam_i(spg))
+### 7.4 InferenceServer Responsibilities
 
-Apply absence rule:
-- if now - last_seen_global > absent_seconds
-- emit ABSENT_ALERT_FIRED
-- send Telegram
+Single process:
+- Load model ONCE (FaceDetector + Matcher)
+- Read frames from SharedMemory by camera_id
+- Apply frame_skip (configurable: skip N frames between inferences)
+- Detect faces → Extract embeddings → Match gallery
+- Send results to output_queue
 
-### 7.5 ANY-of-N Rule
+### 7.5 Main Process (Router + Aggregator)
+
+- Drain output_queue
+- Dispatch results to feedback_queues (per-camera, for visualization)
+- Convert matched faces to Events → EventStore
+- Feed events to OutletAggregator
+- Run absence tick → Fire alerts
+
+### 7.6 SharedMemory & Frame Skip (Performance)
+
+- SharedMemory eliminates ~24MB/s pickle overhead (4 cameras @ 5 FPS)
+- frame_skip reduces inference load (e.g., frame_skip=2 → process 1 in 3 frames)
+- Configurable via `inference` section in YAML:
+  ```yaml
+  inference:
+    frame_skip: 0
+    max_frame_height: 720
+    max_frame_width: 1280
+  ```
+
+### 7.7 ANY-of-N Rule
 SPG dianggap PRESENT jika:
-now - max(last_seen_cam_i) <= absent_seconds
+`now - max(last_seen_cam_i) <= absent_seconds`
 
 SPG dianggap ABSENT hanya jika:
 - Tidak terlihat di seluruh kamera
 - Melebihi absent_seconds
 
-### 7.6 Deployment Model
-Per outlet:
-- 1 process per camera
-- 1 process aggregator
-Ex: 
-python run cam01
-python run cam02
-python run cam03
-python run cam04
-python aggregate outlet_mkg
+### 7.8 Deployment
+```bash
+# Terminal 1: Start pipeline (auto-spawns workers + inference server)
+make run          # Production RTSP
+make simulate     # Dev simulation
+
+# Terminal 2: Start dashboard
+make dashboard
+```
+

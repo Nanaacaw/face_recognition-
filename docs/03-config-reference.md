@@ -238,10 +238,50 @@ Rules:
 - Tidak boleh hardcode threshold di source code.
 - Tidak boleh conditional logic berdasarkan ENV di kode.
 - Perbedaan behavior harus berasal dari config file.
+- RTSP credentials TIDAK boleh di-commit ke Git.
+  - `configs/app.dev.yaml` → gitignored.
+  - `configs/app.dev.yaml.example` → committed (template tanpa credential).
 
 ---
 
-# 8) Tuning Strategy
+# 8) inference (Centralized Mode)
+
+## inference.frame_skip
+Type: int
+Default: 0
+
+Description:
+Jumlah frame yang dilewati antara setiap inference.
+- `0` = proses setiap frame (no skip)
+- `2` = proses 1 dari 3 frame
+
+Berguna pada hardware lemah dengan banyak kamera.
+
+---
+
+## inference.max_frame_height
+Type: int
+Default: 720
+
+Description:
+Tinggi maksimum frame yang di-buffer di SharedMemory.
+Frame yang lebih tinggi akan di-resize otomatis sebelum dikirim ke InferenceServer.
+**Tidak mempengaruhi akurasi** — model InsightFace selalu resize ke `det_size` secara internal.
+
+---
+
+## inference.max_frame_width
+Type: int
+Default: 1280
+
+Description:
+Lebar maksimum frame yang di-buffer di SharedMemory.
+Bersama `max_frame_height`, menentukan total alokasi RAM per kamera:
+`max_frame_height × max_frame_width × 3 bytes` (~2.6MB untuk 720p).
+
+---
+
+# 9) Tuning Strategy
 
 Tuning order:
 
@@ -249,15 +289,40 @@ Tuning order:
 2. Adjust min_consecutive_hits
 3. Adjust grace_seconds
 4. Adjust process_fps
+5. Adjust inference.frame_skip (jika CPU/GPU overload)
 
 Never tune everything at once.
 
-# 9) Multi-Camera Deployment Strategy
-Per camera:
-configs/mkg_cam01.yaml
-configs/mkg_cam02.yaml
-...
+---
 
-Per outlet aggregator dijalankan dengan:
-aggregate --data_dirs data_cam01 data_cam02 ...
-(Jumlah kamera fleksibel (2–5+))
+# 10) Deployment
+
+## Centralized Mode (Production)
+
+Semua kamera dalam satu outlet dikelola oleh **1 command**:
+
+```bash
+# Terminal 1: Pipeline (auto-spawn semua workers + inference server)
+make run           # Production (RTSP cameras)
+make simulate      # Dev (video files)
+
+# Terminal 2: Dashboard
+make dashboard
+```
+
+**Proses yang berjalan**: 1 main + 1 inference + N cameras + 1 dashboard = N + 3.
+
+## Konfigurasi per Outlet
+
+Setiap outlet menggunakan 1 config file:
+```
+configs/app.dev.yaml       → Development
+configs/app.staging.yaml   → Staging
+configs/app.prod.yaml      → Production
+```
+
+Dipilih melalui `APP_ENV` di `.env`:
+```
+APP_ENV=dev       → configs/app.dev.yaml
+APP_ENV=prod      → configs/app.prod.yaml
+```
