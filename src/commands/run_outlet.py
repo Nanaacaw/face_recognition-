@@ -3,7 +3,6 @@ from __future__ import annotations
 import multiprocessing
 import time
 import os
-import json
 import sys
 import queue
 import cv2
@@ -16,9 +15,7 @@ from src.notification.telegram_notifier import TelegramNotifier
 from src.pipeline.webcam_reader import WebcamReader
 from src.pipeline.rtsp_reader import RTSPReader
 from src.storage.event_store import EventStore
-from src.storage.snapshot_store import SnapshotStore
 from src.settings.settings import load_settings
-from dotenv import load_dotenv
 
 from src.settings.logger import logger
 from src.storage.snapshot_cleaner import SnapshotCleaner
@@ -26,8 +23,8 @@ from src.storage.snapshot_cleaner import SnapshotCleaner
 
 # --- LIGHTWEIGHT CAMERA WORKER ---
 def worker_camera_capture(
-    camera_id: str, 
-    source_url: str, 
+    camera_id: str,
+    source_url: str,
     process_fps: int,
     loop_video: bool,
     input_queue: multiprocessing.Queue,
@@ -38,6 +35,10 @@ def worker_camera_capture(
     shm_max_h: int = 720,
     shm_max_w: int = 1280,
     shm_lock: multiprocessing.Lock | None = None,
+    preview_frame_save_interval_sec: float = 0.2,
+    preview_frame_width: int = 640,
+    preview_jpeg_quality: int = 80,
+    idle_sleep_sec: float = 0.05,
 ):
     """
     Lightweight camera capture process:
@@ -134,17 +135,18 @@ def worker_camera_capture(
                     cv2.putText(frame, label, (x1, max(0, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
                 # E. Save preview thumbnail (5x per second)
-                if now - last_frame_time > 0.2:
+                if now - last_frame_time > preview_frame_save_interval_sec:
                     try:
                         h, w = frame.shape[:2]
-                        # Resize for dashboard (width 640)
-                        small = cv2.resize(frame, (640, int(h * 640 / w)))
-                        cv2.imwrite(preview_path, small, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                        last_frame_time = now
-                    except: pass
+                        if w > 0:
+                            small = cv2.resize(frame, (preview_frame_width, int(h * preview_frame_width / w)))
+                            cv2.imwrite(preview_path, small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
+                            last_frame_time = now
+                    except Exception:
+                        pass
 
             else:
-                 time.sleep(0.05)
+                time.sleep(idle_sleep_sec)
 
     except KeyboardInterrupt:
         pass
@@ -200,15 +202,16 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         sys.exit(1)
 
     # Directories
-    base_data_dir = os.path.join(settings.storage.data_dir, "sim_output")
+    base_data_dir = os.path.join(settings.storage.data_dir, settings.storage.sim_output_subdir)
     os.makedirs(base_data_dir, exist_ok=True)
     
     old_state = os.path.join(base_data_dir, "outlet_state.json")
     if os.path.exists(old_state): os.remove(old_state)
     
     try:
-        SnapshotCleaner(settings.storage.data_dir, 3).clean()
-    except: pass
+        SnapshotCleaner(settings.storage.data_dir, settings.storage.snapshot_retention_days).clean()
+    except Exception:
+        pass
 
     # IPC
     input_queue = multiprocessing.Queue(maxsize=10) 
@@ -286,6 +289,10 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             feedback_queue=worker_feedback_queues[cam_id],
             data_dir=d,
             outlet_id=outlet_id,
+            preview_frame_save_interval_sec=settings.runtime.preview_frame_save_interval_sec,
+            preview_frame_width=settings.runtime.preview_frame_width,
+            preview_jpeg_quality=settings.runtime.preview_jpeg_quality,
+            idle_sleep_sec=settings.runtime.worker_idle_sleep_sec,
         )
         
         if use_shm:
@@ -312,11 +319,17 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     event_stores = {cid: EventStore(d) for cid, d in cam_dirs.items()}
     
     # Telegram
-    load_dotenv()
     notifier = None
     if settings.notification.telegram_enabled:
         try:
-            notifier = TelegramNotifier.from_env()
+            notifier = TelegramNotifier.from_env(
+                token_env=settings.notification.telegram_bot_token_env,
+                chat_id_env=settings.notification.telegram_chat_id_env,
+                timeout_sec=settings.notification.timeout_sec,
+                max_retries=settings.notification.max_retries,
+                retry_backoff_base_sec=settings.notification.retry_backoff_base_sec,
+                retry_after_default_sec=settings.notification.retry_after_default_sec,
+            )
         except Exception as e:
             logger.warning(f"Telegram notifier disabled: {e}")
     else:
@@ -369,10 +382,20 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             for al in alerts:
                 reason = al.details.get("reason", "unknown")
                 spg = al.name or al.spg_id
+                ts_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(al.ts))
+                txt = (
+                    "SPG ABSENCE DETECTED\n"
+                    f"Outlet: {al.outlet_id}\n"
+                    f"SPG: {spg} ({al.spg_id})\n"
+                    f"Reason: {reason}\n"
+                    f"Time: {ts_str}"
+                )
                 logger.info(f"[Alert] Sending Telegram: ABSENCE {spg} ({reason})")
                 if notifier:
-                    try: notifier.send_message(txt)
-                    except: pass
+                    try:
+                        notifier.send_message(txt)
+                    except Exception:
+                        pass
             
             aggregator.dump_state(state_path)
             
@@ -380,7 +403,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                 logger.error("Inference Died")
                 break
                 
-            time.sleep(0.05)
+            time.sleep(settings.runtime.main_loop_sleep_sec)
 
     except KeyboardInterrupt:
         logger.info("Stopping...")

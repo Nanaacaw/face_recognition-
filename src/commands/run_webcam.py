@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 import time
 import os
 
@@ -31,6 +30,15 @@ def run_webcam_recognition(
     loop_video: bool = False,
     gallery_dir: str | None = None,
     enable_notifier: bool = True,
+    notifier_token_env: str = "SPG_TELEGRAM_BOT_TOKEN",
+    notifier_chat_id_env: str = "SPG_TELEGRAM_CHAT_ID",
+    notifier_timeout_sec: int = 15,
+    notifier_max_retries: int = 3,
+    notifier_retry_backoff_base_sec: int = 2,
+    notifier_retry_after_default_sec: int = 5,
+    preview_frame_save_interval_sec: float = 0.2,
+    preview_frame_width: int = 640,
+    preview_jpeg_quality: int = 80,
     **kwargs,
 ):
     actual_gallery_dir = gallery_dir if gallery_dir else data_dir
@@ -43,7 +51,14 @@ def run_webcam_recognition(
     notifier = None
     if enable_notifier:
         try:
-            notifier = TelegramNotifier.from_env()
+            notifier = TelegramNotifier.from_env(
+                token_env=notifier_token_env,
+                chat_id_env=notifier_chat_id_env,
+                timeout_sec=notifier_timeout_sec,
+                max_retries=notifier_max_retries,
+                retry_backoff_base_sec=notifier_retry_backoff_base_sec,
+                retry_after_default_sec=notifier_retry_after_default_sec,
+            )
         except Exception as e:
             logger.warning(f"Telegram notifier disabled: {e}")
 
@@ -169,14 +184,14 @@ def run_webcam_recognition(
                         2,
                     )
 
-                # Save latest camera frame for dashboard preview (5x per second)
-                if now - last_frame_time > 0.2:
+                # Save latest camera frame for dashboard preview.
+                if now - last_frame_time > preview_frame_save_interval_sec:
                     try:
                         h, w = frame.shape[:2]
-                        # Resize for dashboard (width 640)
-                        small = cv2.resize(frame, (640, int(h * 640 / w)))
-                        cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                        last_frame_time = now
+                        if w > 0:
+                            small = cv2.resize(frame, (preview_frame_width, int(h * preview_frame_width / w)))
+                            cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
+                            last_frame_time = now
                     except Exception:
                         pass
 

@@ -2,24 +2,22 @@ import json
 import os
 import glob
 import time
-from datetime import datetime
+from collections import deque
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel
 from src.pipeline.face_detector import FaceDetector
 from src.settings.settings import load_settings
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SIM_OUTPUT_DIR = os.path.join(BASE_DIR, "data", "sim_output")
+SETTINGS = load_settings()
+DATA_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.sim_output_subdir)
+GALLERY_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.gallery_subdir)
 
-if not os.path.exists(SIM_OUTPUT_DIR):
-    print(f"Warning: {SIM_OUTPUT_DIR} does not exist yet. Dashboard might be empty.")
-    os.makedirs(SIM_OUTPUT_DIR, exist_ok=True)
-
-DATA_DIR = SIM_OUTPUT_DIR
+if not os.path.exists(DATA_DIR):
+    print(f"Warning: {DATA_DIR} does not exist yet. Dashboard might be empty.")
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 app = FastAPI(title="SPG Dashboard", version="2.0")
 
@@ -39,34 +37,37 @@ def get_state():
     path = os.path.join(DATA_DIR, "outlet_state.json")
     if not os.path.exists(path):
         return {"status": "waiting", "outlet_id": "Unknown", "spgs": []}
-    
+
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
-def get_recent_events(limit=50):
+def get_recent_events(limit: int | None = None):
+    limit = limit or SETTINGS.dashboard.recent_events_limit
     events = []
     pattern = os.path.join(DATA_DIR, "cam_*", "events.jsonl")
     files = glob.glob(pattern)
-    
+
     for ef in files:
         cam_id = os.path.basename(os.path.dirname(ef))
         try:
-            with open(ef, "r") as f:
-                lines = f.readlines()
-                for line in lines[-limit:]:
-                    if line.strip():
-                        try:
-                            ev = json.loads(line)
-                            ev["_camera"] = cam_id
-                            events.append(ev)
-                        except:
-                            pass
-        except:
+            with open(ef, "r", encoding="utf-8") as f:
+                recent_lines = deque(f, maxlen=limit)
+
+            for line in recent_lines:
+                if not line.strip():
+                    continue
+                try:
+                    ev = json.loads(line)
+                    ev["_camera"] = cam_id
+                    events.append(ev)
+                except json.JSONDecodeError:
+                    continue
+        except Exception:
             pass
-            
+
     events.sort(key=lambda x: x.get("ts", 0), reverse=True)
     return events[:limit]
 
@@ -100,7 +101,7 @@ async def api_state():
                 spg["snapshot_url"] = None
     
     last_ts = state.get("timestamp", 0)
-    is_live = (time.time() - last_ts) < 10
+    is_live = (time.time() - last_ts) < SETTINGS.dashboard.live_window_seconds
     state["system_status"] = "LIVE" if is_live else "OFFLINE"
     
     return state
@@ -135,7 +136,7 @@ async def mjpeg_generator(cam_id: str, request: Request):
     """Yields MJPEG stream from latest_frame.jpg. Stops when client disconnects."""
     import asyncio
     file_path = os.path.join(DATA_DIR, cam_id, "snapshots", "latest_frame.jpg")
-    
+
     while not await request.is_disconnected():
         if os.path.exists(file_path):
             try:
@@ -144,12 +145,12 @@ async def mjpeg_generator(cam_id: str, request: Request):
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
-                
-                await asyncio.sleep(0.2)
+
+                await asyncio.sleep(SETTINGS.dashboard.stream_frame_interval_sec)
             except Exception:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(SETTINGS.dashboard.stream_error_sleep_sec)
         else:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(SETTINGS.dashboard.stream_missing_frame_sleep_sec)
 
 @app.get("/stream/{cam_id}")
 async def stream_feed(cam_id: str, request: Request):
@@ -159,20 +160,15 @@ async def stream_feed(cam_id: str, request: Request):
     )
 
 
-# Gallery Management
-
-GALLERY_DIR = os.path.join(BASE_DIR, "data", "gallery")
-
 _detector_instance: "FaceDetector | None" = None
 
 def _get_detector():
     global _detector_instance
     if _detector_instance is None:
-        cfg = load_settings()
         _detector_instance = FaceDetector(
-            name=cfg.recognition.model_name,
-            providers=cfg.recognition.execution_providers,
-            det_size=tuple(cfg.recognition.det_size)
+            name=SETTINGS.recognition.model_name,
+            providers=SETTINGS.recognition.execution_providers,
+            det_size=SETTINGS.recognition.det_size,
         )
         _detector_instance.start()
     return _detector_instance
@@ -187,7 +183,7 @@ async def manage_page(request: Request):
 async def api_gallery_list():
     """List all enrolled SPGs."""
     from src.storage.gallery_store import GalleryStore
-    store = GalleryStore(os.path.join(BASE_DIR, "data"))
+    store = GalleryStore(SETTINGS.storage.data_dir)
     gallery = store.load_all()
 
     result = []
@@ -259,7 +255,7 @@ async def api_gallery_enroll(request: Request):
             detector=detector,
         )
 
-        store = GalleryStore(os.path.join(BASE_DIR, "data"))
+        store = GalleryStore(SETTINGS.storage.data_dir)
         store.save_person(spg_id, payload)
 
         if face_crop is not None:
@@ -298,4 +294,9 @@ async def api_gallery_delete(spg_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.frontend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "src.frontend.main:app",
+        host=SETTINGS.dashboard.host,
+        port=SETTINGS.dashboard.port,
+        reload=SETTINGS.dashboard.reload,
+    )
