@@ -27,6 +27,8 @@ storage:
   data_dir: "./data"
   snapshot_enabled: true
   snapshot_retention_days: 14
+  sim_output_subdir: "sim_output"
+  gallery_subdir: "gallery"
 
 ## Mode 2: Multi-Camera Outlet (for run_outlet)
 outlet:
@@ -52,6 +54,12 @@ inference:
 ## Notification
 notification:
   telegram_enabled: true
+  telegram_bot_token_env: "SPG_TELEGRAM_BOT_TOKEN"
+  telegram_chat_id_env: "SPG_TELEGRAM_CHAT_ID"
+  timeout_sec: 15
+  max_retries: 3
+  retry_backoff_base_sec: 2
+  retry_after_default_sec: 5
 
 ## Mode 3: Simulation (dev only, overrides outlet cameras with video files)
 dev:
@@ -59,3 +67,20 @@ dev:
   video_files:
     - "sample_video/testing_kantor.mp4"
     - "sample_video/testing_kantor.mp4"
+
+runtime:
+  worker_idle_sleep_sec: 0.05
+  main_loop_sleep_sec: 0.05
+  preview_frame_save_interval_sec: 0.2
+  preview_frame_width: 640
+  preview_jpeg_quality: 80
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  live_window_seconds: 10
+  recent_events_limit: 50
+  stream_frame_interval_sec: 0.2
+  stream_error_sleep_sec: 0.5
+  stream_missing_frame_sleep_sec: 1.0
