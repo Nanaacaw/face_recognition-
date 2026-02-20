@@ -39,6 +39,7 @@ def worker_camera_capture(
     preview_frame_width: int = 640,
     preview_jpeg_quality: int = 80,
     idle_sleep_sec: float = 0.05,
+    preview: bool = False,
 ):
     """
     Lightweight camera capture process:
@@ -135,6 +136,10 @@ def worker_camera_capture(
                     except Exception:
                         pass
 
+                if preview:
+                    cv2.imshow(f"face_recog | {camera_id}", frame)
+                    cv2.waitKey(1)
+
             else:
                 time.sleep(idle_sleep_sec)
 
@@ -146,6 +151,8 @@ def worker_camera_capture(
         if shm_buf:
             shm_buf.close()
         reader.stop()
+        if preview:
+            cv2.destroyAllWindows()
         logger.info(f"[CamWorker {camera_id}] Stopped.")
 
 
@@ -282,6 +289,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             preview_frame_width=settings.runtime.preview_frame_width,
             preview_jpeg_quality=settings.runtime.preview_jpeg_quality,
             idle_sleep_sec=settings.runtime.worker_idle_sleep_sec,
+            preview=preview,
         )
         
         if use_shm:
