@@ -1,24 +1,48 @@
+## Mode 1: Single Webcam (for local testing via run_webcam) ──
 camera:
   source: webcam # webcam | rtsp
-  webcam_index: 0 # 0 | null
-  rtsp_url: null # null | rtsp_url
-  process_fps: 5
-  preview: true # true | false
+  webcam_index: 0
+  rtsp_url: null
+  process_fps: 15
+  preview: true
 
+target:
+  spg_ids: ["001", "002", "003", "004", "005", "006", "007"]
+  outlet_id: "outlet_test"
+  camera_id: "webcam_01"
+
+## Shared Settings
 recognition:
   threshold: 0.30
   min_consecutive_hits: 2
 
 presence:
-  grace_seconds: 3 # for testing, default: 20 sec
-  absent_seconds: 10 # for testing, default 300 sec (5 menit)
+  grace_seconds: 3 # dev: 3, production: 20
+  absent_seconds: 10 # dev: 10, production: 300 (5 min)
 
 storage:
   data_dir: "./data"
   snapshot_enabled: true
   snapshot_retention_days: 14
 
-target:
-  spg_ids: ["001","002","003","004","005","006","007"]
-  outlet_id: "OUTLET_DEV"
-  camera_id: "CAM01"
+## ── Mode 2: Multi-Camera Outlet (for run_outlet) ──
+outlet:
+  id: "outlet_mkg"
+  name: "Outlet Mall Kelapa Gading"
+  cameras:
+    - id: "cam_01"
+      rtsp_url: "rtsp://admin:Admin123@172.168.0.64:554/Streaming/Channels/101"
+    - id: "cam_02"
+      rtsp_url: "rtsp://admin:Admin123@172.168.0.65:554/Streaming/Channels/201"
+    - id: "cam_03"
+      rtsp_url: "rtsp://admin:Admin123@172.168.0.66:554/Streaming/Channels/301"
+    - id: "cam_04"
+      rtsp_url: "rtsp://admin:Admin123@172.168.0.67:554/Streaming/Channels/401"
+  target_spg_ids: ["001", "002", "003", "004", "005", "006", "007"]
+
+## ── Mode 3: Simulation (dev only, overrides outlet cameras with video files) ──
+dev:
+  simulate: true
+  video_files:
+    - "sample_video/testing_kantor.mp4"
+    - "sample_video/testing_kantor.mp4"

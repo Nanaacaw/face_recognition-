@@ -17,12 +17,13 @@ venv/
 env/
 .env
 .env.*
-!.env.example
 data/
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 .agents
-
+logs
 mkg_*.yaml
+
+sample_video

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPG Outlet Monitoring</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 font-sans" x-data="dashboard()">
+
+    <!-- Navbar -->
+    <nav class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center">
+                        <span class="text-2xl mr-2">🏪</span>
+                        <h1 class="text-xl font-bold text-gray-900" x-text="state.outlet_id || 'Loading...'"></h1>
+                    </div>
+                    <div class="ml-6 flex items-center space-x-4">
+                        <span class="px-3 py-1 rounded-full text-xs font-medium"
+                            :class="systemStatus === 'LIVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                            <span class="w-2 h-2 rounded-full inline-block mr-1"
+                                :class="systemStatus === 'LIVE' ? 'bg-green-500' : 'bg-red-500'"></span>
+                            <span x-text="systemStatus"></span>
+                        </span>
+                        <span class="text-xs text-gray-500" x-text="'Last Update: ' + lastUpdate"></span>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/manage" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                        👥 Manage SPG
+                    </a>
+                    <button @click="toggleCameras()"
+                        class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                        <span x-text="showCameras ? 'Hide Cameras' : 'Show Cameras'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Stats Row -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <!-- Total -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="text-sm font-medium text-gray-500">Total Personnel</div>
+                <div class="mt-2 text-3xl font-bold text-gray-900" x-text="stats.total">0</div>
+            </div>
+            <!-- Present -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
+                <div class="text-sm font-medium text-gray-500">Present</div>
+                <div class="mt-2 text-3xl font-bold text-green-600" x-text="stats.present">0</div>
+            </div>
+            <!-- Absent -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-red-500">
+                <div class="text-sm font-medium text-gray-500">Absent</div>
+                <div class="mt-2 text-3xl font-bold text-red-600" x-text="stats.absent">0</div>
+            </div>
+            <!-- Attendance Rate -->
+            <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="text-sm font-medium text-gray-500">Attendance Rate</div>
+                <div class="mt-2 text-3xl font-bold text-blue-600" x-text="stats.rate + '%'">0%</div>
+            </div>
+        </div>
+
+        <!-- Camera Section (Toggleable) -->
+        <div x-show="showCameras" x-transition.duration.300ms class="mb-8">
+            <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center">
+                <span>📹 Live Feeds</span>
+                <span class="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded">MJPEG (Low
+                    Latency)</span>
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <template x-for="cam in cameras" :key="cam.id">
+                    <div class="bg-black rounded-lg overflow-hidden shadow-lg relative aspect-video group">
+                        <img :src="cam.url" class="w-full h-full object-cover" alt="Camera Feed">
+                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                            <span class="text-white text-sm font-mono" x-text="cam.id"></span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="cameras.length === 0"
+                    class="col-span-full bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center text-gray-500">
+                    No active cameras detected.
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- SPG Status Grid (Left, wider) -->
+            <div class="lg:col-span-2 space-y-6">
+                <h2 class="text-lg font-bold text-gray-900">👥 Personnel Status</h2>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <template x-for="spg in sortedSpgs" :key="spg.id">
+                        <div class="bg-white rounded-xl shadow-sm overflow-hidden border transition-all duration-300 hover:shadow-md"
+                            :class="{
+                                'border-green-500 ring-1 ring-green-500': spg.status === 'PRESENT',
+                                'border-red-500 ring-1 ring-red-500': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
+                                'border-gray-200': spg.status === 'NOT_SEEN_YET'
+                             }">
+
+                            <!-- Header Status Bar -->
+                            <div class="px-4 py-2 text-xs font-bold uppercase tracking-wide flex justify-between items-center"
+                                :class="{
+                                    'bg-green-50 text-green-700': spg.status === 'PRESENT',
+                                    'bg-red-50 text-red-700': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
+                                    'bg-gray-50 text-gray-600': spg.status === 'NOT_SEEN_YET'
+                                 }">
+                                <span x-text="spg.status.replace('_', ' ')"></span>
+                                <span x-text="formatDuration(spg.seconds_since_last_event)"></span>
+                            </div>
+
+                            <div class="p-4 flex items-start space-x-4">
+                                <!-- Photo -->
+                                <div
+                                    class="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 flex-shrink-0 border-2 border-white shadow-sm">
+                                    <template x-if="spg.snapshot_url">
+                                        <img :src="spg.snapshot_url" class="w-full h-full object-cover">
+                                    </template>
+                                    <template x-if="!spg.snapshot_url">
+                                        <div
+                                            class="w-full h-full flex items-center justify-center text-gray-400 text-xl">
+                                            👤</div>
+                                    </template>
+                                </div>
+
+                                <!-- Info -->
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-sm font-medium text-gray-900 truncate"
+                                        x-text="spg.name || 'Unknown'"></p>
+                                    <p class="text-xs text-gray-500 truncate" x-text="'ID: ' + spg.id"></p>
+
+                                    <div class="mt-2 flex items-center text-xs text-gray-500">
+                                        <span class="mr-1">🕒 Last seen:</span>
+                                        <span
+                                            x-text="spg.last_seen_ts ? new Date(spg.last_seen_ts * 1000).toLocaleTimeString() : '-'"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Recent Events Sidebar (Right) -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[600px]">
+                <div class="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl">
+                    <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">📋 Recent Events</h3>
+                </div>
+                <div class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                    <template x-for="ev in events" :key="ev.ts + ev.spg_id">
+                        <div class="p-3 rounded-lg text-sm border-l-4" :class="{
+                                'bg-green-50 border-green-400': ev.event_type.includes('PRESENT') || ev.event_type.includes('SEEN'),
+                                'bg-red-50 border-red-400': ev.event_type.includes('ABSENT'),
+                                'bg-gray-50 border-gray-300': !ev.event_type.includes('PRESENT') && !ev.event_type.includes('ABSENT')
+                             }">
+                            <div class="flex justify-between items-start">
+                                <span class="font-bold text-gray-800" x-text="ev.name || ev.spg_id"></span>
+                                <span class="text-xs text-gray-400"
+                                    x-text="new Date(ev.ts * 1000).toLocaleTimeString()"></span>
+                            </div>
+                            <div class="text-xs text-gray-600 mt-1" x-text="ev.event_type.replace(/_/g, ' ')"></div>
+                            <div class="text-xs text-gray-400 mt-0.5 flex justify-between">
+                                <span x-text="ev._camera"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="events.length === 0" class="text-center text-gray-400 py-8 text-sm">
+                        No events yet...
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        function dashboard() {
+            return {
+                state: { spgs: [] },
+                events: [],
+                cameras: [],
+                systemStatus: 'OFFLINE',
+                lastUpdate: '-',
+                showCameras: false,
+
+                init() {
+                    this.fetchData();
+                    this.fetchCameras();
+                    setInterval(() => this.fetchData(), 2000); // Poll every 2s
+                },
+
+                async fetchData() {
+                    try {
+                        // Fetch State
+                        const resState = await fetch('/api/state');
+                        const dataState = await resState.json();
+                        this.state = dataState;
+                        this.systemStatus = dataState.system_status || 'OFFLINE';
+                        this.lastUpdate = new Date().toLocaleTimeString();
+
+                        // Fetch Events
+                        const resEvents = await fetch('/api/events');
+                        this.events = await resEvents.json();
+                    } catch (e) {
+                        console.error("Fetch error", e);
+                        this.systemStatus = 'ERROR';
+                    }
+                },
+
+                async fetchCameras() {
+                    try {
+                        const res = await fetch('/api/cameras');
+                        const cams = await res.json();
+                        this.cameras = cams.map(c => ({
+                            id: c.id,
+                            url: c.stream_url
+                        }));
+                        if (this.cameras.length > 0) {
+                            this.showCameras = true;
+                        }
+                    } catch (e) {
+                        console.error("Camera fetch error", e);
+                    }
+                },
+
+                toggleCameras() {
+                    this.showCameras = !this.showCameras;
+                },
+
+                get sortedSpgs() {
+                    if (!this.state.spgs) return [];
+                    // Priority: ABSENT/NEVER_ARRIVED > PRESENT > NOT_SEEN
+                    const priority = {
+                        "ABSENT": 0, "NEVER_ARRIVED": 0,
+                        "PRESENT": 1,
+                        "NOT_SEEN_YET": 2
+                    };
+                    return [...this.state.spgs].sort((a, b) => {
+                        const pa = priority[a.status] ?? 99;
+                        const pb = priority[b.status] ?? 99;
+                        return pa - pb;
+                    });
+                },
+
+                get stats() {
+                    const spgs = this.state.spgs || [];
+                    const total = spgs.length;
+                    const present = spgs.filter(s => s.status === 'PRESENT').length;
+                    const absent = spgs.filter(s => ['ABSENT', 'NEVER_ARRIVED'].includes(s.status)).length;
+                    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
+                    return { total, present, absent, rate };
+                },
+
+                formatDuration(seconds) {
+                    if (!seconds) return '0s';
+                    if (seconds < 60) return `${seconds}s`;
+                    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+                    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

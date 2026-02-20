@@ -19,18 +19,23 @@ For each SPG:
 
 ---
 
-## 3) Recommended Capture Process (Webcam MVP)
+## 3) Enrollment Process
 
-1. Ask SPG to stand in front of webcam
-2. Capture frames over 5–10 seconds
-3. Automatically:
-   - Skip blurred frames
-   - Skip very small faces
-   - Skip overexposed frames
-4. Store embeddings only (not raw image by default)
+### 3.1 Web Dashboard (Recommended)
+Gunakan halaman `/manage` pada dashboard.
 
-Optional:
-- Save sample face crops for audit
+1. **Upload Foto**:
+   - Cocok jika SPG tidak ada di lokasi.
+   - Upload 3–5 foto wajah berbeda (depan, serong kiri, serong kanan).
+   - Sistem otomatis crop wajah terbaik.
+
+2. **Webcam Capture**:
+   - Cocok jika SPG ada di depan PC admin.
+   - Klik "Capture" 3–5 kali sambil minta SPG sedikit mengubah pose.
+
+### 3.2 CLI Command (Legacy/Dev Only)
+Hanya gunakan jika tidak bisa akses dashboard.
+`python -m src.enrollment.enroll_webcam ...`
 
 ---
 
