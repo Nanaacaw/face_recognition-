@@ -1,278 +1,245 @@
-# face_recog - Configuration Reference
+# Configuration Reference
 
-Semua parameter runtime dibaca dari file YAML.
+Semua runtime behavior dibaca dari YAML config + env variables.
 
-## Config Resolution Order
+## 1. Config Resolution
 
-1. `APP_CONFIG_PATH` (jika diisi, langsung pakai path ini)
+Urutan prioritas:
+
+1. `APP_CONFIG_PATH`
 2. `APP_ENV` -> `configs/app.<env>.yaml`
-3. Default environment: `dev`
+3. default `dev`
 
-Contoh:
-
-```env
-APP_ENV=dev
-# atau:
-APP_CONFIG_PATH=./configs/app.custom.yaml
-```
-
----
-
-## 1) camera
+## 2. camera
 
 ### `camera.source`
+
 - Type: `string`
 - Allowed: `webcam | rtsp`
 
 ### `camera.webcam_index`
-- Type: `int`
-- Used when: `camera.source=webcam`
+
+- Type: `int | null`
+- Dipakai saat `camera.source=webcam`
 
 ### `camera.rtsp_url`
-- Type: `string`
-- Used when: `camera.source=rtsp`
+
+- Type: `string | null`
+- Dipakai saat `camera.source=rtsp`
+- Rekomendasi: `${RTSP_CAM_01_URL}`
 
 ### `camera.process_fps`
+
 - Type: `int`
-- Recommendation: `3-5`
+- Fungsi: membatasi rate frame yang diproses pipeline
 
 ### `camera.preview`
+
 - Type: `bool`
-- Description: tampilkan preview OpenCV.
+- Menyalakan preview OpenCV window
 
----
-
-## 2) recognition
+## 3. recognition
 
 ### `recognition.threshold`
-- Type: `float` (`0.0-1.0`)
-- Typical: `0.40-0.55`
+
+- Type: `float`
 
 ### `recognition.min_consecutive_hits`
+
 - Type: `int`
-- Typical: `2-3`
 
 ### `recognition.model_name`
+
 - Type: `string`
 - Default: `buffalo_s`
-- Allowed: `buffalo_s | buffalo_l`
 
 ### `recognition.execution_providers`
+
 - Type: `list[string]`
-- Default: `["CUDAExecutionProvider", "CPUExecutionProvider"]`
+- Contoh: `["CUDAExecutionProvider", "CPUExecutionProvider"]`
 
 ### `recognition.det_size`
+
 - Type: `list[int, int]` atau `tuple[int, int]`
-- Default: `[640, 640]`
 
----
-
-## 3) presence
+## 4. presence
 
 ### `presence.grace_seconds`
+
 - Type: `int`
-- Typical: `15-30`
 
 ### `presence.absent_seconds`
+
 - Type: `int`
-- Default: `300`
 
----
-
-## 4) storage
+## 5. storage
 
 ### `storage.data_dir`
+
 - Type: `string`
-- Default: `./data`
 
 ### `storage.snapshot_enabled`
+
 - Type: `bool`
 
 ### `storage.snapshot_retention_days`
+
 - Type: `int`
-- Recommendation: dev `3-7`, prod `7-30`
 
 ### `storage.sim_output_subdir`
+
 - Type: `string`
 - Default: `sim_output`
-- Description: output multi-camera (`outlet_state`, events, preview frame per kamera).
 
 ### `storage.gallery_subdir`
+
 - Type: `string`
 - Default: `gallery`
-- Description: metadata gallery dan face crop terakhir.
 
----
-
-## 5) target (single camera mode)
+## 6. target (single-camera mode)
 
 ### `target.spg_ids`
+
 - Type: `list[string]`
 
 ### `target.outlet_id`
+
 - Type: `string`
 
 ### `target.camera_id`
+
 - Type: `string`
 
----
-
-## 6) outlet (multi-camera mode)
+## 7. outlet (multi-camera mode)
 
 ### `outlet.id`
+
 - Type: `string`
 
 ### `outlet.name`
+
 - Type: `string`
 
 ### `outlet.cameras`
+
 - Type: `list[{id, rtsp_url}]`
+- Untuk security, isi `rtsp_url` dari env placeholder.
 
 ### `outlet.target_spg_ids`
+
 - Type: `list[string]`
 
----
-
-## 7) inference
+## 8. inference
 
 ### `inference.frame_skip`
+
 - Type: `int`
-- Default: `0`
-- Description: `0` proses semua frame, `2` proses 1 dari 3 frame.
+- `0` = proses semua frame
 
 ### `inference.max_frame_height`
+
 - Type: `int`
-- Default: `720`
 
 ### `inference.max_frame_width`
+
 - Type: `int`
-- Default: `1280`
 
----
-
-## 8) notification
+## 9. notification
 
 ### `notification.telegram_enabled`
+
 - Type: `bool`
-- Default: `true`
 
 ### `notification.telegram_bot_token_env`
+
 - Type: `string`
 - Default: `SPG_TELEGRAM_BOT_TOKEN`
 
 ### `notification.telegram_chat_id_env`
+
 - Type: `string`
 - Default: `SPG_TELEGRAM_CHAT_ID`
 
 ### `notification.timeout_sec`
+
 - Type: `int`
-- Default: `15`
 
 ### `notification.max_retries`
+
 - Type: `int`
-- Default: `3`
 
 ### `notification.retry_backoff_base_sec`
+
 - Type: `int`
-- Default: `2`
 
 ### `notification.retry_after_default_sec`
+
 - Type: `int`
-- Default: `5`
 
----
+## 10. runtime
 
-## 9) runtime
+### Loop
 
-### `runtime.worker_idle_sleep_sec`
-- Type: `float`
-- Default: `0.05`
+- `runtime.worker_idle_sleep_sec` (`float`)
+- `runtime.main_loop_sleep_sec` (`float`)
 
-### `runtime.main_loop_sleep_sec`
-- Type: `float`
-- Default: `0.05`
+### Supervisor (self-healing)
 
-### `runtime.preview_raw_enabled`
-- Type: `bool`
-- Default: `true`
-- Description: simpan `latest_raw_frame.jpg` untuk raw view dashboard.
+- `runtime.supervisor_restart_cooldown_sec` (`float`)
+- `runtime.supervisor_max_restarts_per_minute` (`int`)
 
-### `runtime.preview_frame_save_interval_sec`
-- Type: `float`
-- Default: `0.2`
+### Adaptive degrade
 
-### `runtime.preview_frame_width`
-- Type: `int`
-- Default: `640`
+- `runtime.auto_degrade_enabled` (`bool`)
+- `runtime.auto_degrade_lag_high_ms` (`float`)
+- `runtime.auto_degrade_lag_low_ms` (`float`)
+- `runtime.auto_degrade_high_streak` (`int`)
+- `runtime.auto_degrade_low_streak` (`int`)
+- `runtime.auto_degrade_max_frame_skip` (`int`)
 
-### `runtime.preview_jpeg_quality`
-- Type: `int`
-- Default: `80`
+### Preview persistence
 
----
+- `runtime.preview_raw_enabled` (`bool`)
+- `runtime.preview_frame_save_interval_sec` (`float`)
+- `runtime.preview_frame_width` (`int`)
+- `runtime.preview_jpeg_quality` (`int`)
 
-## 10) dashboard
+## 11. dashboard
 
-### `dashboard.host`
-- Type: `string`
-- Default: `0.0.0.0`
+- `dashboard.host` (`string`)
+- `dashboard.port` (`int`)
+- `dashboard.reload` (`bool`)
+- `dashboard.live_window_seconds` (`int`)
+- `dashboard.recent_events_limit` (`int`)
+- `dashboard.stream_frame_interval_sec` (`float`)
+- `dashboard.stream_error_sleep_sec` (`float`)
+- `dashboard.stream_missing_frame_sleep_sec` (`float`)
 
-### `dashboard.port`
-- Type: `int`
-- Default: `8000`
+## 12. Required Environment Variables
 
-### `dashboard.reload`
-- Type: `bool`
-- Default: `true` (biasanya `false` di staging/prod)
-
-### `dashboard.live_window_seconds`
-- Type: `int`
-- Default: `10`
-
-### `dashboard.recent_events_limit`
-- Type: `int`
-- Default: `50`
-
-### `dashboard.stream_frame_interval_sec`
-- Type: `float`
-- Default: `0.2`
-
-### `dashboard.stream_error_sleep_sec`
-- Type: `float`
-- Default: `0.5`
-
-### `dashboard.stream_missing_frame_sleep_sec`
-- Type: `float`
-- Default: `1.0`
-
----
-
-## 11) Environment Variables
-
-Required for Telegram notification:
-
-- `SPG_TELEGRAM_BOT_TOKEN`
-- `SPG_TELEGRAM_CHAT_ID`
+- `RTSP_CAM_01_URL`
+- `RTSP_CAM_02_URL`
+- `RTSP_CAM_03_URL`
+- `RTSP_CAM_04_URL`
 
 Optional:
 
-- `APP_ENV` (`dev`, `staging`, `prod`)
-- `APP_CONFIG_PATH` (custom config path)
+- `SPG_TELEGRAM_BOT_TOKEN`
+- `SPG_TELEGRAM_CHAT_ID`
+- `APP_ENV`
+- `APP_CONFIG_PATH`
 
----
+## 13. Profile Recommendations
 
-## 12) Tuning Order (Recommended)
+### Demo
 
-1. `recognition.threshold`
-2. `recognition.min_consecutive_hits`
-3. `presence.grace_seconds`
-4. `camera.process_fps`
-5. `inference.frame_skip`
+- `process_fps` lebih tinggi
+- `frame_skip` dasar rendah (`0`)
+- stream interval lebih cepat
 
----
+### Production
 
-## 13) Deployment Notes
-
-- Centralized mode dijalankan via `make run` (production) atau `make simulate` (development simulation).
-- Dashboard dijalankan via `make dashboard`.
-- Jangan commit credential RTSP dan secret Telegram ke Git.
+- `process_fps` moderat
+- `frame_skip` dasar `1`
+- auto-degrade tetap aktif untuk spike handling
+- preview width/quality lebih hemat

@@ -1,98 +1,42 @@
-# face_recog — Enrollment Guidelines
+# Enrollment Guidelines
 
-## 1) Purpose
+Kualitas enrollment sangat mempengaruhi akurasi recognition.
 
-Enrollment quality determines recognition accuracy.
-Bad enrollment = high false negative or false positive.
+## 1. Target Minimum
 
----
+Per SPG:
 
-## 2) Minimum Requirements
+- 3 sampai 5 foto berkualitas baik (minimum untuk dashboard upload)
+- wajah jelas, fokus, dan tidak blur
+- variasi pose ringan (depan, serong kiri, serong kanan)
 
-For each SPG:
+## 2. Recommended Method
 
-- Capture 20–50 good-quality samples
-- Face size ≥ 100px width (recommended)
-- Clear focus (no motion blur)
-- Lighting adequate (not overexposed)
-- Avoid extreme angles
+Gunakan dashboard `/manage`:
 
----
+1. isi `SPG ID` dan `Nama`
+2. upload 1 sampai 5 foto
+3. submit enrollment
 
-## 3) Enrollment Process
+## 3. Capture Quality Rules
 
-### 3.1 Web Dashboard (Recommended)
-Gunakan halaman `/manage` pada dashboard.
+- pencahayaan cukup
+- wajah tidak tertutup masker/kacamata hitam (kecuali memang skenario operasional)
+- hindari foto kompresi berat dari chat app
+- hindari foto jarak jauh dari CCTV
 
-1. **Upload Foto**:
-   - Cocok jika SPG tidak ada di lokasi.
-   - Upload 3–5 foto wajah berbeda (depan, serong kiri, serong kanan).
-   - Sistem otomatis crop wajah terbaik.
+## 4. Re-enrollment Triggers
 
-2. **Webcam Capture**:
-   - Cocok jika SPG ada di depan PC admin.
-   - Klik "Capture" 3–5 kali sambil minta SPG sedikit mengubah pose.
+Lakukan re-enroll jika:
 
-### 3.2 CLI Command (Legacy/Dev Only)
-Hanya gunakan jika tidak bisa akses dashboard.
-`python -m src.enrollment.enroll_webcam ...`
+- performa recognition turun konsisten
+- perubahan tampilan signifikan
+- perubahan kondisi lighting outlet
 
----
+## 5. Data Policy
 
-## 4) Pose Variation
-
-Include:
-- Slight left/right turn
-- Slight up/down tilt
-- Neutral expression
-
-Avoid:
-- Extreme profile
-- Face covered
-- Sunglasses
-- Mask (unless system must support mask)
-
----
-
-## 5) Do NOT
-
-- Enroll from random selfie with different camera angle
-- Use compressed WhatsApp image
-- Use only 1 single image
-- Enroll from CCTV far-distance face
-
----
-
-## 6) Re-enrollment Policy
-
-Re-enroll SPG if:
-- Hairstyle drastically changes
-- Recognition drops significantly
-- Mask policy changes
-- Lighting environment changes
-
----
-
-## 7) Gallery Storage Policy
-
-For each SPG:
-- Store:
-  - spg_id
-  - name
-  - list of embeddings
-  - enrollment timestamp
-- Do NOT store excessive raw face images (privacy risk)
-
----
-
-## 8) Recognition Threshold Impact
-
-Lower threshold:
-- More tolerant
-- Higher false positive risk
-
-Higher threshold:
-- Safer identity
-- More false negative
-
-Threshold tuning must be done in staging environment.
+- simpan hanya data yang diperlukan:
+  - embedding
+  - metadata identitas
+  - last face crop
+- jangan menyimpan data wajah mentah berlebihan tanpa kebutuhan operasional.

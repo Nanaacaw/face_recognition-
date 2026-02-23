@@ -1,59 +1,48 @@
-# face_recog — MVP Checklist (Webcam)
+# MVP Checklist
 
-## A) Setup & Reproducibility
-- [ ] Repo punya folder: `src/`, `configs/`, `data/`, `docs/`, `scripts/`
-- [ ] `environment.yml` ada dan bisa dibuat di Windows
-- [ ] `conda activate face_recog` lalu import sukses:
-      `cv2`, `numpy`, `insightface`, `onnxruntime`
+## A. Setup and Config
 
-## B) Config & Secrets
-- [ ] Ada `.env.example` (tanpa secrets real)
-- [ ] Ada `configs/app.dev.yaml`
-- [ ] Setting tidak hardcode (threshold/timer/fps)
+- [x] `environment.yml` valid dan environment bisa dibuat.
+- [x] Konfigurasi dibaca dari YAML + env.
+- [x] Support quick switch config via command dan Makefile.
+- [x] `.env.example` tersedia tanpa secret real.
 
-## C) Webcam Pipeline
-- [ ] Command debug preview webcam berjalan
-- [ ] Face detection overlay terlihat (bbox)
-- [ ] Processing fps sesuai config (frame drop allowed)
+## B. Security and Secrets
 
-## D) Enrollment (Gallery)
-- [x] Bisa enroll SPG:
-      `spg_id`, `name`, `upload/webcam`
-- [x] Gallery tersimpan di `data/gallery/` (format JSON + JPG)
-- [x] Enrollment punya quality gate minimal:
-      - skip frame blur parah
-      - minimal N samples tersimpan
+- [x] RTSP URL memakai env placeholder (`${RTSP_CAM_XX_URL}`).
+- [x] Guard fail-fast saat RTSP env belum diisi pada mode RTSP.
+- [x] Telegram token/chat id dibaca dari env.
 
-## E) Recognition Realtime
-- [x] Bisa recognize SPG ter-enroll
-- [x] Unknown jika di bawah threshold
-- [x] Preview menampilkan `name + similarity`
+## C. Pipeline Core
 
-## F) Presence Logic (Core)
-- [x] `grace_seconds` diterapkan (tidak langsung ABSENT)
-- [x] `absent_seconds` = 300 detik
-- [x] Anti-spam: alert hanya 1x sampai SPG terlihat lagi
-- [x] Event transisi tercatat:
-      `SPG_PRESENT`, `SPG_ABSENT`
+- [x] Inference centralized untuk multi-camera.
+- [x] Presence logic outlet level (ANY-of-N).
+- [x] Event logging per kamera.
+- [x] Alert absence anti-spam.
 
-## G) Logging & Evidence
-- [x] `data/events.jsonl` terisi event JSONL
-- [x] Saat alert fired:
-      - snapshot full frame tersimpan
-      - path tercatat di event
+## D. Resilience
 
-## H) Telegram Alert
-- [x] `SPG_TELEGRAM_BOT_TOKEN` & `SPG_TELEGRAM_CHAT_ID` dibaca dari env
-- [x] Alert `ABSENT_ALERT_FIRED` masuk Telegram
-- [x] Snapshot terkirim sebagai foto (kalau enabled)
+- [x] Supervisor restart inference process.
+- [x] Supervisor restart worker per kamera.
+- [x] Restart budget guard untuk mencegah crash loop.
+- [x] RTSP reconnect exponential backoff + jitter.
+- [x] Auto-degrade runtime (`frame_skip`) saat lag tinggi.
 
-## I) Performance & Tools
-- [x] Vectorized Matcher (NumPy) untuk high-throughput
-- [x] Configurable FaceDetector (`buffalo_l` / `buffalo_s`)
-- [x] FastAPI Dashboard (`/manage` untuk enrollment)
+## E. Dashboard
 
-## J) Definition of Done (MVP)
-MVP dianggap selesai jika:
-- [x] Enroll 1 SPG → recognize realtime
-- [x] SPG menghilang > 5 menit → Telegram alert + snapshot + event log
-- [x] SPG muncul lagi → status reset, alert bisa terjadi lagi pada periode hilang berikutnya
+- [x] Monitoring status SPG dan events.
+- [x] Camera health card (status/fps/lag/inference).
+- [x] AI stream MJPEG stabil (last-good-frame fallback).
+- [x] Raw view dihapus dari UI demo agar lebih fokus.
+
+## F. Enrollment
+
+- [x] Manage SPG via dashboard.
+- [x] Upload foto untuk enrollment.
+- [x] Hapus SPG dari gallery.
+
+## G. Operational Readiness
+
+- [x] Profil default untuk demo/dev, staging, dan production.
+- [x] Dokumentasi command run pipeline + dashboard sudah sinkron.
+- [x] Daily report tersedia untuk tracking progres harian.

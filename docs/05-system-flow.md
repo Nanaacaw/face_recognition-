@@ -1,225 +1,132 @@
 # System Flow and Runtime Architecture
 
-Dokumen ini menjelaskan alur data aktual pada kode saat ini (terutama `run_outlet`, `InferenceServer`, dashboard FastAPI, dan mode simulasi).
+Dokumen ini menjelaskan alur runtime aktual pada mode multi-camera centralized.
 
----
+## 1. Operation Modes
 
-## 1) Mode Operasi
+### Single camera
 
-### A. Single Camera (`python -m src.app run`)
-- Menggunakan `run_webcam.py`.
-- Detection + matching + presence berjalan dalam satu proses.
-- Cocok untuk dev cepat (webcam / satu RTSP).
+- Command: `python -m src.app run`
+- Flow: capture -> inference -> presence -> alert dalam satu proses.
 
-### B. Centralized Multi-Camera (`python -m src.commands.run_outlet`)
-- Dipakai oleh:
-  - `make run` (production RTSP dari `outlet.cameras`)
-  - `make simulate` (video file dari `dev.video_files`)
-- Arsitektur:
-  - `N` camera worker process
-  - `1` inference server process (model load sekali)
-  - `1` main process (router + aggregator + alert)
+### Multi-camera centralized
 
----
+- Command:
+  - `python -m src.commands.run_outlet --config <yaml>`
+  - atau quick switch `make run-demo|run-staging|run-prod`
+- Flow:
+  - N camera workers
+  - 1 inference server
+  - 1 main process (router + aggregator + supervisor)
 
-## 2) Centralized Pipeline (Production and Simulate)
+## 2. Main Pipeline
 
-```mermaid
-flowchart TD
-    subgraph workers["Camera Workers (N process)"]
-        W1["Worker cam_01"]
-        W2["Worker cam_02"]
-        WN["Worker cam_N"]
-    end
-
-    subgraph shm["Shared Memory (per camera)"]
-        S1["buffer cam_01"]
-        S2["buffer cam_02"]
-        SN["buffer cam_N"]
-    end
-
-    subgraph inf["InferenceServer (1 process)"]
-        DET["FaceDetector"]
-        MAT["Matcher"]
-    end
-
-    subgraph main["Main Process"]
-        ROUTER["Result Router"]
-        AGG["OutletAggregator"]
-        STORE["EventStore per camera"]
-        TG["TelegramNotifier (optional)"]
-    end
-
-    W1 -->|write frame| S1
-    W2 -->|write frame| S2
-    WN -->|write frame| SN
-
-    W1 -->|metadata cam_id, frame_id, ts| DET
-    W2 -->|metadata| DET
-    WN -->|metadata| DET
-
-    S1 --> DET
-    S2 --> DET
-    SN --> DET
-
-    DET --> MAT --> ROUTER
-    ROUTER -->|feedback queue| W1
-    ROUTER -->|feedback queue| W2
-    ROUTER -->|feedback queue| WN
-    ROUTER --> AGG --> STORE
-    AGG -->|ABSENT_ALERT_FIRED| TG
-```
-
----
-
-## 3) Step-by-Step Runtime Flow
-
-1. Worker membaca frame dari source:
-   - RTSP / webcam / video file (simulate mode).
-2. Worker throttle output frame berdasarkan `camera.process_fps`.
-3. Worker kirim frame ke inference:
-   - Mode utama: tulis ke shared memory + kirim metadata ke `input_queue`.
-   - Fallback: kirim frame langsung via queue jika shared memory gagal.
-4. Inference server menerima item, lalu:
-   - Optional skip frame dengan `inference.frame_skip`.
-   - Jalankan detection + matching.
-   - Kirim hasil ke `output_queue`.
+1. Worker membaca frame dari RTSP/webcam/file.
+2. Worker throttle berdasarkan `camera.process_fps`.
+3. Worker kirim metadata/frame ke inference:
+   - shared memory mode (utama)
+   - queue fallback mode
+4. Inference server:
+   - baca item queue
+   - apply `frame_skip` (dinamis)
+   - detect + match
+   - kirim hasil ke output queue
 5. Main process:
-   - Broadcast hasil ke `feedback_queue` worker (untuk bbox overlay preview worker).
-   - Simpan event matched ke `events.jsonl` per kamera.
-   - Ingest ke `OutletAggregator` (ANY-of-N logic).
-   - Fire absence alert ke Telegram (jika enabled).
-   - Dump `outlet_state.json` untuk dashboard.
-6. Worker menyimpan `latest_frame.jpg` berkala untuk dashboard stream.
+   - route feedback ke worker
+   - generate event `SPG_SEEN`
+   - ingest ke `OutletAggregator`
+   - tick absence logic + alert
+   - dump state dan health JSON
 
----
+## 3. Self-Healing Supervisor
 
-## 4) Dashboard Data Flow
+Main loop memonitor process:
 
-```mermaid
-flowchart LR
-    subgraph pipe["Pipeline"]
-        J1["cam_x/snapshots/latest_frame.jpg"]
-        J1R["cam_x/snapshots/latest_raw_frame.jpg"]
-        J2["outlet_state.json"]
-        J3["cam_x/events.jsonl"]
-        J4["camera_health.json"]
-    end
+- inference process
+- worker per kamera
 
-    subgraph api["FastAPI Dashboard"]
-        A1["/stream/{cam_id}"]
-        A1R["/stream_raw/{cam_id}"]
-        A2["/api/state"]
-        A3["/api/events"]
-    end
+Jika mati:
 
-    subgraph browser["Browser"]
-        B1["AI camera view (MJPEG)"]
-        B1R["Raw camera view (MJPEG)"]
-        B2["Status cards"]
-        B3["Recent events"]
-        B4["Camera health cards"]
-    end
+- restart dengan cooldown `runtime.supervisor_restart_cooldown_sec`
+- restart dibatasi `runtime.supervisor_max_restarts_per_minute`
+- jika budget habis, worker/inference ditandai exhausted
 
-    J1 --> A1 --> B1
-    J1R --> A1R --> B1R
-    J2 --> A2 --> B2
-    J3 --> A3 --> B3
-    J4 --> A2 --> B4
-```
+## 4. Adaptive Degrade
 
-Catatan:
-- Stream dashboard membaca file `latest_frame.jpg`, bukan stream RTSP langsung.
-- Raw view dashboard membaca `latest_raw_frame.jpg`.
-- Jadi FPS live dashboard ditentukan oleh interval simpan frame + interval baca stream.
+Saat load tinggi (lag naik), main loop otomatis naikkan `frame_skip`.
+Saat stabil kembali, `frame_skip` diturunkan.
 
----
+Kontrol:
 
-## 5) Arsitektur Proses
+- `runtime.auto_degrade_enabled`
+- `runtime.auto_degrade_lag_high_ms`
+- `runtime.auto_degrade_lag_low_ms`
+- `runtime.auto_degrade_high_streak`
+- `runtime.auto_degrade_low_streak`
+- `runtime.auto_degrade_max_frame_skip`
 
-```
-[Main Process: run_outlet]
-  |- InferenceServer (child process, model load sekali)
-  |- CameraWorker cam_01 (child process)
-  |- CameraWorker cam_02 (child process)
-  |- ...
-  `- Router + Aggregator loop
+## 5. RTSP Failure Handling
 
-[Separate Process]
-  `- FastAPI dashboard (make dashboard)
-```
+`RTSPReader` memakai:
 
-Total proses saat centralized mode:
-- `1 main + 1 inference + N worker + 1 dashboard = N + 3`
+- reconnect exponential backoff
+- jitter
+- retry schedule non-blocking
 
----
+Tujuan: mencegah reconnect storm saat jaringan tidak normal.
 
-## 6) Konfigurasi yang Mengatur Throughput
+## 6. Dashboard Data Flow
 
-### `camera.process_fps`
-- Lokasi: reader (`WebcamReader` dan `RTSPReader`).
-- Berlaku di:
-  - single webcam mode
-  - production (`make run`)
-  - simulate (`make simulate`)
-- Fungsi: membatasi frame yang diteruskan ke pipeline (bukan kualitas kamera).
+Pipeline menghasilkan:
 
-### `inference.frame_skip`
-- Lokasi: `InferenceServer`.
-- Fungsi: skip inference N frame antar proses inference.
-- Efek: event/bbox update lebih jarang, beban inferensi turun.
+- `outlet_state.json`
+- `camera_health.json`
+- `cam_x/events.jsonl`
+- `cam_x/snapshots/latest_frame.jpg`
 
-### `runtime.preview_frame_save_interval_sec`
-- Lokasi: worker.
-- Fungsi: interval update `latest_frame.jpg` untuk dashboard.
+Dashboard FastAPI membaca data ini lewat:
 
-### `dashboard.stream_frame_interval_sec`
-- Lokasi: dashboard stream generator.
-- Fungsi: interval pengiriman frame MJPEG ke browser.
+- `GET /api/state`
+- `GET /api/events`
+- `GET /api/health`
+- `GET /stream/{cam_id}`
 
-FPS dashboard efektif kira-kira dibatasi oleh nilai paling kecil dari komponen di atas.
+## 7. Stream Stability Notes
 
----
+- Worker menulis preview JPEG secara atomic.
+- Stream endpoint validasi basic JPEG boundary.
+- Jika frame baru tidak valid, endpoint pakai last-good-frame.
 
-## 7) Simulate and Preview
+## 8. Health Metrics
 
-### Simulate mode
-- `make simulate` -> `python -m src.commands.run_outlet --simulate --preview`
-- Source frame diambil dari `dev.video_files` pada config aktif.
-- Jika semua path video invalid, pipeline tidak punya source valid dan tidak ada output.
+Per kamera:
 
-### Preview window
-- `--preview` sekarang aktif: worker akan menampilkan `cv2.imshow` per kamera.
-- `--no-preview` tetap headless.
-- Preview ini berbeda dengan dashboard stream (file-based MJPEG).
+- `status` (`LIVE`, `STALE`, `OFFLINE`)
+- `processed_fps`
+- `inference_time_ms`
+- `queue_lag_ms`
+- `last_result_age_sec`
+- `worker_alive`
+- `worker_restarts_last_minute`
+- `restart_exhausted`
 
----
+Global:
 
-## 8) Presence Rule (ANY-of-N)
+- `frame_skip`
+- `base_frame_skip`
+- status supervisor inference
 
-Untuk outlet multi-camera:
-- SPG dianggap `PRESENT` jika terlihat di salah satu kamera.
-- SPG dianggap `ABSENT` bila tidak terlihat di semua kamera lebih lama dari `presence.absent_seconds`.
-- Alert absence di-fire sekali per periode absence, lalu reset saat SPG muncul kembali.
+## 9. Recommended Runtime Profiles
 
----
+### Demo
 
-## 9) Known Constraints
+- smooth UI
+- `process_fps` lebih tinggi
+- base `frame_skip` rendah
 
-1. `process_fps` tinggi tidak otomatis membuat dashboard 60 FPS.
-2. Menurunkan `process_fps` menurunkan densitas sampling waktu:
-   - aksi cepat bisa terlewat,
-   - delay deteksi meningkat.
-3. Menurunkan `process_fps` tidak menurunkan "kemampuan asli" CCTV; ini hanya rate pemrosesan di sisi aplikasi.
-4. Jika shared memory gagal, sistem fallback ke queue mode (lebih berat CPU karena serialization).
+### Production
 
----
-
-## 10) Recommended Tuning Order
-
-1. `recognition.threshold`
-2. `recognition.min_consecutive_hits`
-3. `presence.grace_seconds`
-4. `camera.process_fps`
-5. `inference.frame_skip`
-6. `runtime.preview_frame_save_interval_sec` + `dashboard.stream_frame_interval_sec` (jika fokus UI smoothness)
+- hemat resource
+- base `frame_skip` moderat
+- auto-degrade aktif untuk spike handling
+- preview width/quality lebih kecil
