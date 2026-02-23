@@ -14,6 +14,7 @@ from src.settings.settings import load_settings
 SETTINGS = load_settings()
 DATA_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.sim_output_subdir)
 GALLERY_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.gallery_subdir)
+HEALTH_PATH = os.path.join(DATA_DIR, "camera_health.json")
 
 if not os.path.exists(DATA_DIR):
     print(f"Warning: {DATA_DIR} does not exist yet. Dashboard might be empty.")
@@ -43,6 +44,25 @@ def get_state():
             return json.load(f)
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+def get_health():
+    if not os.path.exists(HEALTH_PATH):
+        return {"timestamp": 0, "outlet_id": "Unknown", "cameras": []}
+
+    try:
+        with open(HEALTH_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {"timestamp": 0, "outlet_id": "Unknown", "cameras": []}
+
+    if not isinstance(payload, dict):
+        return {"timestamp": 0, "outlet_id": "Unknown", "cameras": []}
+    payload.setdefault("cameras", [])
+    payload.setdefault("timestamp", 0)
+    payload.setdefault("outlet_id", "Unknown")
+    return payload
+
 
 def get_recent_events(limit: int | None = None):
     limit = limit or SETTINGS.dashboard.recent_events_limit
@@ -91,6 +111,7 @@ async def index(request: Request):
 @app.get("/api/state")
 async def api_state():
     state = get_state()
+    health = get_health()
     if "spgs" in state:
         for spg in state["spgs"]:
             spg_id = spg.get("id")
@@ -103,12 +124,19 @@ async def api_state():
     last_ts = state.get("timestamp", 0)
     is_live = (time.time() - last_ts) < SETTINGS.dashboard.live_window_seconds
     state["system_status"] = "LIVE" if is_live else "OFFLINE"
+    state["camera_health"] = health.get("cameras", [])
+    state["camera_health_timestamp"] = health.get("timestamp", 0)
     
     return state
 
 @app.get("/api/events")
 async def api_events():
     return get_recent_events()
+
+
+@app.get("/api/health")
+async def api_health():
+    return get_health()
 
 @app.get("/api/snapshot/{spg_id}")
 async def api_snapshot(spg_id: str):
@@ -127,15 +155,17 @@ async def api_cameras():
             cam_id = os.path.basename(d)
             cams.append({
                 "id": cam_id,
-                "stream_url": f"/stream/{cam_id}"
+                "stream_url": f"/stream/{cam_id}",
+                "ai_stream_url": f"/stream/{cam_id}",
+                "raw_stream_url": f"/stream_raw/{cam_id}",
             })
     return cams
 
 
-async def mjpeg_generator(cam_id: str, request: Request):
-    """Yields MJPEG stream from latest_frame.jpg. Stops when client disconnects."""
+async def mjpeg_generator(cam_id: str, request: Request, filename: str):
+    """Yields MJPEG stream from a snapshot file. Stops when client disconnects."""
     import asyncio
-    file_path = os.path.join(DATA_DIR, cam_id, "snapshots", "latest_frame.jpg")
+    file_path = os.path.join(DATA_DIR, cam_id, "snapshots", filename)
 
     while not await request.is_disconnected():
         if os.path.exists(file_path):
@@ -155,7 +185,15 @@ async def mjpeg_generator(cam_id: str, request: Request):
 @app.get("/stream/{cam_id}")
 async def stream_feed(cam_id: str, request: Request):
     return StreamingResponse(
-        mjpeg_generator(cam_id, request),
+        mjpeg_generator(cam_id, request, "latest_frame.jpg"),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+@app.get("/stream_raw/{cam_id}")
+async def stream_raw_feed(cam_id: str, request: Request):
+    return StreamingResponse(
+        mjpeg_generator(cam_id, request, "latest_raw_frame.jpg"),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 

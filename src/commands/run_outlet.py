@@ -5,6 +5,8 @@ import time
 import os
 import sys
 import queue
+import json
+from collections import deque
 import cv2
 
 from src.pipeline.inference_server import InferenceServer
@@ -19,6 +21,30 @@ from src.settings.settings import load_settings
 
 from src.settings.logger import logger
 from src.storage.snapshot_cleaner import SnapshotCleaner
+
+
+def _safe_write_json(filepath: str, payload: dict, retries: int = 3, retry_sleep_sec: float = 0.05) -> None:
+    """Best-effort JSON write with simple retry to handle transient file locks."""
+    for attempt in range(retries):
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            return
+        except PermissionError:
+            if attempt < retries - 1:
+                time.sleep(retry_sleep_sec)
+        except OSError as e:
+            logger.warning(f"[Main] Failed writing {filepath}: {e}")
+            return
+
+
+def _source_type(source_url: str) -> str:
+    src = str(source_url).lower()
+    if src == "webcam" or src.isdigit():
+        return "webcam"
+    if src.startswith("rtsp://"):
+        return "rtsp"
+    return "file"
 
 
 # LIGHTWEIGHT CAMERA WORKER
@@ -38,6 +64,7 @@ def worker_camera_capture(
     preview_frame_save_interval_sec: float = 0.2,
     preview_frame_width: int = 640,
     preview_jpeg_quality: int = 80,
+    save_raw_preview: bool = True,
     idle_sleep_sec: float = 0.05,
     preview: bool = False,
 ):
@@ -74,6 +101,7 @@ def worker_camera_capture(
     frame_id = 0
     last_frame_time = 0
     preview_path = os.path.join(data_dir, "snapshots", "latest_frame.jpg")
+    raw_preview_path = os.path.join(data_dir, "snapshots", "latest_raw_frame.jpg")
     os.makedirs(os.path.dirname(preview_path), exist_ok=True)
 
     latest_faces = []
@@ -93,6 +121,7 @@ def worker_camera_capture(
             
             if frame is not None:
                 frame_id += 1
+                raw_frame = frame.copy() if save_raw_preview else None
                 
                 try:
                     if shm_buf:
@@ -130,8 +159,12 @@ def worker_camera_capture(
                     try:
                         h, w = frame.shape[:2]
                         if w > 0:
-                            small = cv2.resize(frame, (preview_frame_width, int(h * preview_frame_width / w)))
-                            cv2.imwrite(preview_path, small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
+                            if save_raw_preview and raw_frame is not None:
+                                raw_small = cv2.resize(raw_frame, (preview_frame_width, int(h * preview_frame_width / w)))
+                                cv2.imwrite(raw_preview_path, raw_small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
+
+                            ai_small = cv2.resize(frame, (preview_frame_width, int(h * preview_frame_width / w)))
+                            cv2.imwrite(preview_path, ai_small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
                             last_frame_time = now
                     except Exception:
                         pass
@@ -288,6 +321,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             preview_frame_save_interval_sec=settings.runtime.preview_frame_save_interval_sec,
             preview_frame_width=settings.runtime.preview_frame_width,
             preview_jpeg_quality=settings.runtime.preview_jpeg_quality,
+            save_raw_preview=settings.runtime.preview_raw_enabled,
             idle_sleep_sec=settings.runtime.worker_idle_sleep_sec,
             preview=preview,
         )
@@ -314,6 +348,21 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     )
     
     event_stores = {cid: EventStore(d) for cid, d in cam_dirs.items()}
+    source_by_camera = {cam_id: src for cam_id, src in camera_sources}
+    camera_metrics = {
+        cam_id: {
+            "source_type": _source_type(src),
+            "last_result_ts": 0.0,
+            "last_frame_id": 0,
+            "processed_frames": 0,
+            "events_count": 0,
+            "last_event_ts": 0.0,
+            "inference_time_ema_ms": None,
+            "queue_lag_ema_ms": None,
+        }
+        for cam_id, src in camera_sources
+    }
+    result_windows = {cam_id: deque(maxlen=120) for cam_id, _ in camera_sources}
     
     # Telegram
     notifier = None
@@ -334,6 +383,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     
     logger.info("[Main] Centralized Loop active.")
     state_path = os.path.join(base_data_dir, "outlet_state.json")
+    health_path = os.path.join(base_data_dir, "camera_health.json")
     
     try:
         while True:
@@ -343,6 +393,23 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                 try:
                     res = output_queue.get_nowait()
                     cid = res['camera_id']
+                    now_ts = time.time()
+
+                    metrics = camera_metrics.get(cid)
+                    if metrics is not None:
+                        metrics["processed_frames"] += 1
+                        result_ts = float(res.get("timestamp", now_ts))
+                        metrics["last_result_ts"] = result_ts
+                        metrics["last_frame_id"] = int(res.get("frame_id", 0))
+                        result_windows[cid].append(now_ts)
+
+                        inf_ms = float(res.get("inference_time_ms", 0.0))
+                        prev_inf = metrics["inference_time_ema_ms"]
+                        metrics["inference_time_ema_ms"] = inf_ms if prev_inf is None else (0.2 * inf_ms + 0.8 * prev_inf)
+
+                        lag_ms = max(0.0, (now_ts - result_ts) * 1000.0)
+                        prev_lag = metrics["queue_lag_ema_ms"]
+                        metrics["queue_lag_ema_ms"] = lag_ms if prev_lag is None else (0.2 * lag_ms + 0.8 * prev_lag)
                     
                     if cid in worker_feedback_queues:
                         try:
@@ -365,6 +432,9 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                             if cid in event_stores:
                                 event_stores[cid].append(ev)
                             events_batch.append(ev)
+                            if metrics is not None:
+                                metrics["events_count"] += 1
+                                metrics["last_event_ts"] = float(res.get("timestamp", now_ts))
 
                 except queue.Empty:
                     break
@@ -391,6 +461,46 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                         notifier.send_message(txt)
                     except Exception:
                         pass
+
+            health_now = time.time()
+            health_payload = {
+                "timestamp": health_now,
+                "outlet_id": outlet_id,
+                "cameras": [],
+            }
+            for cam_id, src in source_by_camera.items():
+                m = camera_metrics.get(cam_id, {})
+                window = result_windows.get(cam_id, deque())
+                processed_fps = 0.0
+                if len(window) >= 2:
+                    duration = window[-1] - window[0]
+                    if duration > 0:
+                        processed_fps = (len(window) - 1) / duration
+
+                last_result_ts = float(m.get("last_result_ts") or 0.0)
+                result_age_sec = None if last_result_ts <= 0 else max(0.0, health_now - last_result_ts)
+
+                if result_age_sec is None or result_age_sec > 10.0:
+                    status = "OFFLINE"
+                elif result_age_sec > 2.0:
+                    status = "STALE"
+                else:
+                    status = "LIVE"
+
+                health_payload["cameras"].append(
+                    {
+                        "camera_id": cam_id,
+                        "source_type": m.get("source_type", _source_type(src)),
+                        "status": status,
+                        "processed_fps": round(processed_fps, 2),
+                        "inference_time_ms": round(float(m.get("inference_time_ema_ms") or 0.0), 1),
+                        "queue_lag_ms": round(float(m.get("queue_lag_ema_ms") or 0.0), 1),
+                        "last_result_age_sec": None if result_age_sec is None else round(result_age_sec, 2),
+                        "last_frame_id": int(m.get("last_frame_id") or 0),
+                        "events_count": int(m.get("events_count") or 0),
+                    }
+                )
+            _safe_write_json(health_path, health_payload)
             
             aggregator.dump_state(state_path)
             

@@ -87,6 +87,7 @@ class RuntimeConfig(BaseModel):
     worker_idle_sleep_sec: float = 0.05
     main_loop_sleep_sec: float = 0.05
     # Preview frame persistence
+    preview_raw_enabled: bool = True
     preview_frame_save_interval_sec: float = 0.2
     preview_frame_width: int = 640
     preview_jpeg_quality: int = 80
