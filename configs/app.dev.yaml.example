@@ -71,6 +71,7 @@ dev:
 runtime:
   worker_idle_sleep_sec: 0.05
   main_loop_sleep_sec: 0.05
+  preview_raw_enabled: true
   preview_frame_save_interval_sec: 0.2
   preview_frame_width: 640
   preview_jpeg_quality: 80

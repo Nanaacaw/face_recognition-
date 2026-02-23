@@ -100,29 +100,37 @@ flowchart TD
 flowchart LR
     subgraph pipe["Pipeline"]
         J1["cam_x/snapshots/latest_frame.jpg"]
+        J1R["cam_x/snapshots/latest_raw_frame.jpg"]
         J2["outlet_state.json"]
         J3["cam_x/events.jsonl"]
+        J4["camera_health.json"]
     end
 
     subgraph api["FastAPI Dashboard"]
         A1["/stream/{cam_id}"]
+        A1R["/stream_raw/{cam_id}"]
         A2["/api/state"]
         A3["/api/events"]
     end
 
     subgraph browser["Browser"]
-        B1["Live camera tiles (MJPEG)"]
+        B1["AI camera view (MJPEG)"]
+        B1R["Raw camera view (MJPEG)"]
         B2["Status cards"]
         B3["Recent events"]
+        B4["Camera health cards"]
     end
 
     J1 --> A1 --> B1
+    J1R --> A1R --> B1R
     J2 --> A2 --> B2
     J3 --> A3 --> B3
+    J4 --> A2 --> B4
 ```
 
 Catatan:
 - Stream dashboard membaca file `latest_frame.jpg`, bukan stream RTSP langsung.
+- Raw view dashboard membaca `latest_raw_frame.jpg`.
 - Jadi FPS live dashboard ditentukan oleh interval simpan frame + interval baca stream.
 
 ---

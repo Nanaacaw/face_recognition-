@@ -192,6 +192,11 @@ APP_CONFIG_PATH=./configs/app.custom.yaml
 - Type: `float`
 - Default: `0.05`
 
+### `runtime.preview_raw_enabled`
+- Type: `bool`
+- Default: `true`
+- Description: simpan `latest_raw_frame.jpg` untuk raw view dashboard.
+
 ### `runtime.preview_frame_save_interval_sec`
 - Type: `float`
 - Default: `0.2`
