@@ -36,13 +36,13 @@ outlet:
   name: "Outlet Mall Kelapa Gading"
   cameras:
     - id: "cam_01"
-      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/101"
+      rtsp_url: "${RTSP_CAM_01_URL}"
     - id: "cam_02"
-      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/201"
+      rtsp_url: "${RTSP_CAM_02_URL}"
     - id: "cam_03"
-      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/301"
+      rtsp_url: "${RTSP_CAM_03_URL}"
     - id: "cam_04"
-      rtsp_url: "rtsp://USER:PASS@IP_ADDRESS:554/Streaming/Channels/401"
+      rtsp_url: "${RTSP_CAM_04_URL}"
   target_spg_ids: ["001", "002", "003", "004"]
 
 ## Inference Server (Centralized Mode)
@@ -71,10 +71,18 @@ dev:
 runtime:
   worker_idle_sleep_sec: 0.05
   main_loop_sleep_sec: 0.05
-  preview_raw_enabled: true
+  supervisor_restart_cooldown_sec: 3.0
+  supervisor_max_restarts_per_minute: 12
+  auto_degrade_enabled: true
+  auto_degrade_lag_high_ms: 400
+  auto_degrade_lag_low_ms: 170
+  auto_degrade_high_streak: 15
+  auto_degrade_low_streak: 35
+  auto_degrade_max_frame_skip: 2
+  preview_raw_enabled: false
   preview_frame_save_interval_sec: 0.2
   preview_frame_width: 640
-  preview_jpeg_quality: 80
+  preview_jpeg_quality: 75
 
 dashboard:
   host: "0.0.0.0"
@@ -82,6 +90,6 @@ dashboard:
   reload: true
   live_window_seconds: 10
   recent_events_limit: 50
-  stream_frame_interval_sec: 0.2
+  stream_frame_interval_sec: 0.15
   stream_error_sleep_sec: 0.5
-  stream_missing_frame_sleep_sec: 1.0
+  stream_missing_frame_sleep_sec: 0.3

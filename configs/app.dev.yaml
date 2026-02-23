@@ -1,20 +1,23 @@
-## Mode 1: Single Webcam (for local testing via run_webcam) ──
+## Mode 1: Single Webcam (for local testing via run_webcam)
 camera:
-  source: webcam # webcam | rtsp
+  source: webcam
   webcam_index: 0
   rtsp_url: null
-  process_fps: 15
+  process_fps: 8
   preview: true
 
 target:
-  spg_ids: ["001", "002", "003", "004", "005", "006", "007"]
+  spg_ids: ["001", "002", "003", "004"]
   outlet_id: "outlet_test"
   camera_id: "webcam_01"
 
 ## Shared Settings
 recognition:
-  threshold: 0.30
+  threshold: 0.3
   min_consecutive_hits: 2
+  model_name: "buffalo_s"
+  execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  det_size: [640, 640]
 
 presence:
   grace_seconds: 3 # dev: 3, production: 20
@@ -24,25 +27,69 @@ storage:
   data_dir: "./data"
   snapshot_enabled: true
   snapshot_retention_days: 14
+  sim_output_subdir: "sim_output"
+  gallery_subdir: "gallery"
 
-## ── Mode 2: Multi-Camera Outlet (for run_outlet) ──
+## Mode 2: Multi-Camera Outlet (for run_outlet)
 outlet:
   id: "outlet_mkg"
   name: "Outlet Mall Kelapa Gading"
   cameras:
     - id: "cam_01"
-      rtsp_url: "rtsp://admin:Admin123@172.168.0.64:554/Streaming/Channels/101"
+      rtsp_url: "${RTSP_CAM_01_URL}"
     - id: "cam_02"
-      rtsp_url: "rtsp://admin:Admin123@172.168.0.65:554/Streaming/Channels/201"
+      rtsp_url: "${RTSP_CAM_02_URL}"
     - id: "cam_03"
-      rtsp_url: "rtsp://admin:Admin123@172.168.0.66:554/Streaming/Channels/301"
+      rtsp_url: "${RTSP_CAM_03_URL}"
     - id: "cam_04"
-      rtsp_url: "rtsp://admin:Admin123@172.168.0.67:554/Streaming/Channels/401"
-  target_spg_ids: ["001", "002", "003", "004", "005", "006", "007"]
+      rtsp_url: "${RTSP_CAM_04_URL}"
+  target_spg_ids: ["001", "002", "003", "004"]
 
-## ── Mode 3: Simulation (dev only, overrides outlet cameras with video files) ──
+## Inference Server (Centralized Mode)
+inference:
+  frame_skip: 0
+  max_frame_height: 720
+  max_frame_width: 1280
+
+## Notification
+notification:
+  telegram_enabled: true
+  telegram_bot_token_env: "SPG_TELEGRAM_BOT_TOKEN"
+  telegram_chat_id_env: "SPG_TELEGRAM_CHAT_ID"
+  timeout_sec: 15
+  max_retries: 3
+  retry_backoff_base_sec: 2
+  retry_after_default_sec: 5
+
+## Mode 3: Simulation (dev only, overrides outlet cameras with video files)
 dev:
-  simulate: true
+  simulate: false
   video_files:
     - "sample_video/testing_kantor.mp4"
     - "sample_video/testing_kantor.mp4"
+
+runtime:
+  worker_idle_sleep_sec: 0.05
+  main_loop_sleep_sec: 0.05
+  supervisor_restart_cooldown_sec: 3.0
+  supervisor_max_restarts_per_minute: 15
+  auto_degrade_enabled: true
+  auto_degrade_lag_high_ms: 350
+  auto_degrade_lag_low_ms: 140
+  auto_degrade_high_streak: 12
+  auto_degrade_low_streak: 30
+  auto_degrade_max_frame_skip: 2
+  preview_raw_enabled: false
+  preview_frame_save_interval_sec: 0.1
+  preview_frame_width: 640
+  preview_jpeg_quality: 78
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  live_window_seconds: 10
+  recent_events_limit: 50
+  stream_frame_interval_sec: 0.1
+  stream_error_sleep_sec: 0.5
+  stream_missing_frame_sleep_sec: 0.2

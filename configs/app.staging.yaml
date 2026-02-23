@@ -1,12 +1,15 @@
 camera:
   source: webcam
   webcam_index: 0
-  process_fps: 5
+  process_fps: 7
   preview: true
 
 recognition:
   threshold: 0.45
   min_consecutive_hits: 2
+  model_name: "buffalo_s"
+  execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  det_size: [640, 640]
 
 presence:
   grace_seconds: 20
@@ -24,6 +27,11 @@ target:
   outlet_id: "OUTLET_DEV"
   camera_id: "CAM_DEV_01"
 
+inference:
+  frame_skip: 0
+  max_frame_height: 720
+  max_frame_width: 1280
+
 notification:
   telegram_enabled: true
   telegram_bot_token_env: "SPG_TELEGRAM_BOT_TOKEN"
@@ -36,10 +44,18 @@ notification:
 runtime:
   worker_idle_sleep_sec: 0.05
   main_loop_sleep_sec: 0.05
-  preview_raw_enabled: true
-  preview_frame_save_interval_sec: 0.2
+  supervisor_restart_cooldown_sec: 4.0
+  supervisor_max_restarts_per_minute: 12
+  auto_degrade_enabled: true
+  auto_degrade_lag_high_ms: 420
+  auto_degrade_lag_low_ms: 180
+  auto_degrade_high_streak: 16
+  auto_degrade_low_streak: 35
+  auto_degrade_max_frame_skip: 2
+  preview_raw_enabled: false
+  preview_frame_save_interval_sec: 0.15
   preview_frame_width: 640
-  preview_jpeg_quality: 80
+  preview_jpeg_quality: 75
 
 dashboard:
   host: "0.0.0.0"
@@ -47,6 +63,6 @@ dashboard:
   reload: false
   live_window_seconds: 10
   recent_events_limit: 50
-  stream_frame_interval_sec: 0.2
+  stream_frame_interval_sec: 0.15
   stream_error_sleep_sec: 0.5
-  stream_missing_frame_sleep_sec: 1.0
+  stream_missing_frame_sleep_sec: 0.3
