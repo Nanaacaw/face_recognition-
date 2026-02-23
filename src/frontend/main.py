@@ -166,19 +166,28 @@ async def mjpeg_generator(cam_id: str, request: Request, filename: str):
     """Yields MJPEG stream from a snapshot file. Stops when client disconnects."""
     import asyncio
     file_path = os.path.join(DATA_DIR, cam_id, "snapshots", filename)
+    last_good_frame: bytes | None = None
 
     while not await request.is_disconnected():
+        frame_data = None
         if os.path.exists(file_path):
             try:
                 with open(file_path, "rb") as f:
-                    frame_data = f.read()
-                
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
-
-                await asyncio.sleep(SETTINGS.dashboard.stream_frame_interval_sec)
+                    candidate = f.read()
+                # Basic JPEG integrity guard to avoid serving partial writes.
+                if candidate.startswith(b"\xff\xd8") and candidate.endswith(b"\xff\xd9"):
+                    frame_data = candidate
+                    last_good_frame = candidate
             except Exception:
-                await asyncio.sleep(SETTINGS.dashboard.stream_error_sleep_sec)
+                frame_data = None
+
+        if frame_data is None:
+            frame_data = last_good_frame
+
+        if frame_data is not None:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+            await asyncio.sleep(SETTINGS.dashboard.stream_frame_interval_sec)
         else:
             await asyncio.sleep(SETTINGS.dashboard.stream_missing_frame_sleep_sec)
 
@@ -186,7 +195,12 @@ async def mjpeg_generator(cam_id: str, request: Request, filename: str):
 async def stream_feed(cam_id: str, request: Request):
     return StreamingResponse(
         mjpeg_generator(cam_id, request, "latest_frame.jpg"),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -194,7 +208,12 @@ async def stream_feed(cam_id: str, request: Request):
 async def stream_raw_feed(cam_id: str, request: Request):
     return StreamingResponse(
         mjpeg_generator(cam_id, request, "latest_raw_frame.jpg"),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

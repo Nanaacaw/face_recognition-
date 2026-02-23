@@ -10,6 +10,7 @@
         [x-cloak] { display: none !important; }
         .modal-backdrop {
             background: rgba(0, 0, 0, 0.85);
+            -webkit-backdrop-filter: blur(4px);
             backdrop-filter: blur(4px);
         }
     </style>
@@ -34,7 +35,7 @@
                     <a href="/manage" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
                         Manage SPG
                     </a>
-                    <button @click="toggleCameras()" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                    <button type="button" @click="toggleCameras()" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors" title="Toggle camera visibility">
                         <span x-text="showCameras ? 'Hide Cameras' : 'Show Cameras'"></span>
                     </button>
                 </div>
@@ -75,7 +76,7 @@
                         <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex justify-between items-center">
                             <span class="text-white text-sm font-mono" x-text="cam.id"></span>
                             <span class="text-white/60 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
-                                Open dual view
+                                Open live view
                             </span>
                         </div>
                     </div>
@@ -208,15 +209,9 @@
                 </div>
                 <button @click="closeCameraModal()" class="text-white/70 hover:text-white transition-colors text-2xl leading-none">&times;</button>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div class="bg-black rounded-lg overflow-hidden shadow-2xl">
-                    <div class="px-3 py-2 bg-gray-900 text-gray-100 text-xs font-semibold">AI View (overlay)</div>
-                    <img x-show="cameraModal.open" :src="cameraModal.cam?.ai_url" class="w-full h-auto" alt="AI Camera Feed">
-                </div>
-                <div class="bg-black rounded-lg overflow-hidden shadow-2xl">
-                    <div class="px-3 py-2 bg-gray-900 text-gray-100 text-xs font-semibold">Raw View</div>
-                    <img x-show="cameraModal.open" :src="cameraModal.cam?.raw_url" class="w-full h-auto" alt="Raw Camera Feed">
-                </div>
+            <div class="bg-black rounded-lg overflow-hidden shadow-2xl">
+                <div class="px-3 py-2 bg-gray-900 text-gray-100 text-xs font-semibold">AI View (overlay)</div>
+                <img x-show="cameraModal.open" :src="cameraModal.cam?.ai_url" class="w-full h-auto" alt="AI Camera Feed">
             </div>
         </div>
     </div>
@@ -262,8 +257,7 @@
                         const cams = await res.json();
                         this.cameras = cams.map(c => ({
                             id: c.id,
-                            ai_url: c.ai_stream_url || c.stream_url,
-                            raw_url: c.raw_stream_url || c.stream_url
+                            ai_url: c.ai_stream_url || c.stream_url
                         }));
                         if (this.cameras.length > 0) {
                             this.showCameras = true;

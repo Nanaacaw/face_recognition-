@@ -3,6 +3,7 @@ import time
 import numpy as np
 import cv2  # type: ignore
 import traceback
+from typing import Any
 from src.settings.logger import logger
 from src.pipeline.face_detector import FaceDetector
 from src.pipeline.matcher import Matcher
@@ -21,6 +22,7 @@ class InferenceServer:
         gallery_path: str,
         shared_buffers: dict | None = None,
         frame_skip: int = 0,
+        frame_skip_value: Any | None = None,
     ):
         """
         Server process that consumes frames and produces inference results.
@@ -42,6 +44,7 @@ class InferenceServer:
         self.threshold = threshold
         self.gallery_path = gallery_path
         self.frame_skip = max(0, frame_skip)
+        self.frame_skip_value = frame_skip_value
         
         # Shared Memory (optional)
         self._shared_buffer_configs = shared_buffers  # dict of cam_id -> (name, max_h, max_w, lock)
@@ -110,9 +113,16 @@ class InferenceServer:
                         continue
 
                     # --- FRAME SKIP ---
-                    if self.frame_skip > 0:
+                    current_skip = self.frame_skip
+                    if self.frame_skip_value is not None:
+                        try:
+                            current_skip = max(0, int(self.frame_skip_value.value))
+                        except Exception:
+                            current_skip = self.frame_skip
+
+                    if current_skip > 0:
                         count = self._skip_counters.get(camera_id, 0)
-                        if count < self.frame_skip:
+                        if count < current_skip:
                             self._skip_counters[camera_id] = count + 1
                             continue
                         self._skip_counters[camera_id] = 0

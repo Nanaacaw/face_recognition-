@@ -86,6 +86,16 @@ class RuntimeConfig(BaseModel):
     # Loop intervals
     worker_idle_sleep_sec: float = 0.05
     main_loop_sleep_sec: float = 0.05
+    # Supervisor (self-healing)
+    supervisor_restart_cooldown_sec: float = 5.0
+    supervisor_max_restarts_per_minute: int = 12
+    # Adaptive inference load-shedding
+    auto_degrade_enabled: bool = True
+    auto_degrade_lag_high_ms: float = 450.0
+    auto_degrade_lag_low_ms: float = 180.0
+    auto_degrade_high_streak: int = 20
+    auto_degrade_low_streak: int = 40
+    auto_degrade_max_frame_skip: int = 3
     # Preview frame persistence
     preview_raw_enabled: bool = True
     preview_frame_save_interval_sec: float = 0.2
@@ -118,6 +128,16 @@ class AppConfig(BaseModel):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
 
 
+def _expand_env_placeholders(value):
+    if isinstance(value, dict):
+        return {k: _expand_env_placeholders(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_placeholders(v) for v in value]
+    if isinstance(value, str):
+        return os.path.expandvars(value)
+    return value
+
+
 def load_settings(config_path: str | None = None) -> AppConfig:
     load_dotenv()
 
@@ -135,4 +155,5 @@ def load_settings(config_path: str | None = None) -> AppConfig:
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
+    raw = _expand_env_placeholders(raw)
     return AppConfig.model_validate(raw)

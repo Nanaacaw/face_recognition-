@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import re
 import cv2
 
 from src.settings.settings import load_settings
 from src.pipeline.webcam_reader import WebcamReader
 from src.pipeline.face_detector import FaceDetector
 
+_UNRESOLVED_ENV_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|%[A-Za-z_][A-Za-z0-9_]*%")
+
 
 def _resolve_webcam_index(webcam_index: int | None) -> int:
     return 0 if webcam_index is None else webcam_index
+
+
+def _has_unresolved_env_placeholder(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(_UNRESOLVED_ENV_PATTERN.search(str(value)))
 
 
 def cmd_debug(config_path: str | None):
@@ -107,6 +116,8 @@ def main():
 
     if args.command == "run":
         cfg = load_settings(args.config)
+        if cfg.camera.source == "rtsp" and _has_unresolved_env_placeholder(cfg.camera.rtsp_url):
+            raise ValueError("camera.rtsp_url still contains env placeholder. Set RTSP URL in .env.")
         from src.commands.run_webcam import run_webcam_recognition
 
         run_webcam_recognition(

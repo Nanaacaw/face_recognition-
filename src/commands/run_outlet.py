@@ -6,6 +6,7 @@ import os
 import sys
 import queue
 import json
+import re
 from collections import deque
 import cv2
 
@@ -21,6 +22,8 @@ from src.settings.settings import load_settings
 
 from src.settings.logger import logger
 from src.storage.snapshot_cleaner import SnapshotCleaner
+
+_UNRESOLVED_ENV_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|%[A-Za-z_][A-Za-z0-9_]*%")
 
 
 def _safe_write_json(filepath: str, payload: dict, retries: int = 3, retry_sleep_sec: float = 0.05) -> None:
@@ -38,6 +41,51 @@ def _safe_write_json(filepath: str, payload: dict, retries: int = 3, retry_sleep
             return
 
 
+def _write_jpeg_atomic(
+    filepath: str,
+    frame,
+    jpeg_quality: int,
+    retries: int = 2,
+    retry_sleep_sec: float = 0.01,
+) -> bool:
+    """
+    Encode to JPEG in-memory and atomically replace destination file.
+    This prevents readers from seeing partially-written JPEG bytes.
+    """
+    try:
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            frame,
+            [cv2.IMWRITE_JPEG_QUALITY, int(jpeg_quality)],
+        )
+        if not ok:
+            return False
+        payload = encoded.tobytes()
+    except Exception:
+        return False
+
+    tmp_path = f"{filepath}.tmp"
+    for attempt in range(retries):
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(payload)
+            os.replace(tmp_path, filepath)
+            return True
+        except PermissionError:
+            if attempt < retries - 1:
+                time.sleep(retry_sleep_sec)
+        except OSError:
+            if attempt < retries - 1:
+                time.sleep(retry_sleep_sec)
+
+    try:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    except OSError:
+        pass
+    return False
+
+
 def _source_type(source_url: str) -> str:
     src = str(source_url).lower()
     if src == "webcam" or src.isdigit():
@@ -45,6 +93,34 @@ def _source_type(source_url: str) -> str:
     if src.startswith("rtsp://"):
         return "rtsp"
     return "file"
+
+
+def _has_unresolved_env_placeholder(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(_UNRESOLVED_ENV_PATTERN.search(str(value)))
+
+
+def _restart_allowed(restart_history: deque[float], max_restarts_per_minute: int) -> bool:
+    """Sliding-window restart budget guard (60s)."""
+    now = time.time()
+    while restart_history and (now - restart_history[0]) > 60.0:
+        restart_history.popleft()
+    if len(restart_history) >= max_restarts_per_minute:
+        return False
+    restart_history.append(now)
+    return True
+
+
+def _terminate_process(proc: multiprocessing.Process | None, name: str = "process", timeout_sec: float = 1.0) -> None:
+    if proc is None:
+        return
+    try:
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=timeout_sec)
+    except Exception as e:
+        logger.warning(f"[Supervisor] Failed terminating {name}: {e}")
 
 
 # LIGHTWEIGHT CAMERA WORKER
@@ -158,14 +234,15 @@ def worker_camera_capture(
                 if now - last_frame_time > preview_frame_save_interval_sec:
                     try:
                         h, w = frame.shape[:2]
-                        if w > 0:
+                        if w > 0 and preview_frame_width > 0:
+                            target_h = max(1, int(h * preview_frame_width / w))
                             if save_raw_preview and raw_frame is not None:
-                                raw_small = cv2.resize(raw_frame, (preview_frame_width, int(h * preview_frame_width / w)))
-                                cv2.imwrite(raw_preview_path, raw_small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
+                                raw_small = cv2.resize(raw_frame, (preview_frame_width, target_h))
+                                _write_jpeg_atomic(raw_preview_path, raw_small, preview_jpeg_quality)
 
-                            ai_small = cv2.resize(frame, (preview_frame_width, int(h * preview_frame_width / w)))
-                            cv2.imwrite(preview_path, ai_small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
-                            last_frame_time = now
+                            ai_small = cv2.resize(frame, (preview_frame_width, target_h))
+                            if _write_jpeg_atomic(preview_path, ai_small, preview_jpeg_quality):
+                                last_frame_time = now
                     except Exception:
                         pass
 
@@ -189,7 +266,11 @@ def worker_camera_capture(
         logger.info(f"[CamWorker {camera_id}] Stopped.")
 
 
-def run_outlet(preview: bool = False, force_simulate: bool = False):
+def run_outlet(
+    preview: bool = False,
+    force_simulate: bool = False,
+    config_path: str | None = None,
+):
     """
     Main Runner: Centralized Inference (Sidecar Pattern)
     
@@ -200,7 +281,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         ├→ feedback_queues[cam_id] → Workers (visualization)
         └→ OutletAggregator → Events → Alerts
     """
-    settings = load_settings()
+    settings = load_settings(config_path)
     
     if settings.outlet is None:
         logger.error("No 'outlet' section found.")
@@ -227,6 +308,15 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         for cam in outlet.cameras:
             camera_sources.append((cam.id, cam.rtsp_url))
             
+    if not use_simulation:
+        unresolved = [cam_id for cam_id, src in camera_sources if _has_unresolved_env_placeholder(src)]
+        if unresolved:
+            logger.error(
+                "Missing RTSP env vars for: %s. Set RTSP_CAM_XX_URL in .env.",
+                ", ".join(unresolved),
+            )
+            sys.exit(1)
+
     if not camera_sources:
         logger.error("No valid cameras.")
         sys.exit(1)
@@ -254,7 +344,8 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     # Shared Memory Buffers (per camera)
     max_h = settings.inference.max_frame_height
     max_w = settings.inference.max_frame_width
-    frame_skip = settings.inference.frame_skip
+    frame_skip_base = max(0, int(settings.inference.frame_skip))
+    frame_skip_control = multiprocessing.Value("i", frame_skip_base)
     
     shared_buffers = {}
     shared_locks = {}
@@ -282,33 +373,65 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         shared_buffer_configs.clear()
         logger.info("[SharedMem] Disabled, using queue mode.")
 
-    logger.info(f"[Config] frame_skip={frame_skip}")
+    logger.info(f"[Config] base_frame_skip={frame_skip_base}")
 
-    # Start Inference Server
-    server = InferenceServer(
-        input_queue=input_queue,
-        output_queue=output_queue,
-        model_name=settings.recognition.model_name,
-        execution_providers=settings.recognition.execution_providers,
-        det_size=tuple(settings.recognition.det_size),
-        threshold=settings.recognition.threshold,
-        gallery_path=settings.storage.data_dir,
-        shared_buffers=shared_buffer_configs if use_shm else None,
-        frame_skip=frame_skip,
-    )
-    
-    p_server = multiprocessing.Process(target=server.run)
-    p_server.daemon = True
-    p_server.start()
+    # Supervisor and adaptive runtime controls
+    restart_cooldown_sec = max(0.5, float(settings.runtime.supervisor_restart_cooldown_sec))
+    max_restarts_per_minute = max(1, int(settings.runtime.supervisor_max_restarts_per_minute))
+    auto_degrade_enabled = bool(settings.runtime.auto_degrade_enabled)
+    auto_degrade_lag_high_ms = max(1.0, float(settings.runtime.auto_degrade_lag_high_ms))
+    auto_degrade_lag_low_ms = max(0.0, float(settings.runtime.auto_degrade_lag_low_ms))
+    auto_degrade_high_streak_target = max(1, int(settings.runtime.auto_degrade_high_streak))
+    auto_degrade_low_streak_target = max(1, int(settings.runtime.auto_degrade_low_streak))
+    auto_degrade_max_skip = max(frame_skip_base, int(settings.runtime.auto_degrade_max_frame_skip))
+
+    if auto_degrade_lag_low_ms >= auto_degrade_lag_high_ms:
+        auto_degrade_lag_low_ms = max(0.0, auto_degrade_lag_high_ms * 0.6)
+
+    # Start / restart helpers
+    def _spawn_inference() -> multiprocessing.Process:
+        server = InferenceServer(
+            input_queue=input_queue,
+            output_queue=output_queue,
+            model_name=settings.recognition.model_name,
+            execution_providers=settings.recognition.execution_providers,
+            det_size=tuple(settings.recognition.det_size),
+            threshold=settings.recognition.threshold,
+            gallery_path=settings.storage.data_dir,
+            shared_buffers=shared_buffer_configs if use_shm else None,
+            frame_skip=frame_skip_base,
+            frame_skip_value=frame_skip_control,
+        )
+        proc = multiprocessing.Process(target=server.run, name="inference_server")
+        proc.daemon = True
+        proc.start()
+        logger.info(f"[Started] inference_server pid={proc.pid}")
+        return proc
+
+    p_server = _spawn_inference()
     
     # Start Camera Workers
-    processes = [p_server]
     cam_dirs = {}
-    
+    worker_configs: dict[str, dict] = {}
+    worker_processes: dict[str, multiprocessing.Process] = {}
+
+    def _spawn_worker(cam_id: str) -> multiprocessing.Process:
+        kwargs = dict(worker_configs[cam_id])
+        proc = multiprocessing.Process(
+            target=worker_camera_capture,
+            kwargs=kwargs,
+            name=f"camera_worker_{cam_id}",
+        )
+        proc.daemon = True
+        proc.start()
+        worker_processes[cam_id] = proc
+        logger.info(f"[Started] {cam_id} pid={proc.pid} -> {kwargs['source_url']}")
+        return proc
+
     for cam_id, src in camera_sources:
         d = os.path.join(base_data_dir, cam_id)
         cam_dirs[cam_id] = d
-        
+
         worker_kwargs = dict(
             camera_id=cam_id,
             source_url=src,
@@ -325,7 +448,7 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             idle_sleep_sec=settings.runtime.worker_idle_sleep_sec,
             preview=preview,
         )
-        
+
         if use_shm:
             worker_kwargs.update(
                 shm_name=cam_id,
@@ -333,12 +456,9 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                 shm_max_w=max_w,
                 shm_lock=shared_locks[cam_id],
             )
-        
-        p = multiprocessing.Process(target=worker_camera_capture, kwargs=worker_kwargs)
-        p.daemon = True
-        p.start()
-        processes.append(p)
-        logger.info(f"[Started] {cam_id} -> {src}")
+
+        worker_configs[cam_id] = worker_kwargs
+        _spawn_worker(cam_id)
 
     # Aggregator
     aggregator = OutletAggregator(
@@ -363,6 +483,14 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
         for cam_id, src in camera_sources
     }
     result_windows = {cam_id: deque(maxlen=120) for cam_id, _ in camera_sources}
+    worker_restart_histories = {cam_id: deque() for cam_id, _ in camera_sources}
+    worker_last_restart_ts = {cam_id: 0.0 for cam_id, _ in camera_sources}
+    worker_restart_exhausted: set[str] = set()
+    inference_restart_history: deque[float] = deque()
+    inference_last_restart_ts = 0.0
+
+    high_lag_streak = 0
+    low_lag_streak = 0
     
     # Telegram
     notifier = None
@@ -387,6 +515,46 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
     
     try:
         while True:
+            loop_now = time.time()
+
+            # Supervisor: inference process
+            if not p_server.is_alive():
+                if (loop_now - inference_last_restart_ts) >= restart_cooldown_sec and _restart_allowed(
+                    inference_restart_history, max_restarts_per_minute
+                ):
+                    logger.error("[Supervisor] Inference process died. Restarting...")
+                    _terminate_process(p_server, "inference_server")
+                    p_server = _spawn_inference()
+                    inference_last_restart_ts = loop_now
+                elif (loop_now - inference_last_restart_ts) >= restart_cooldown_sec:
+                    logger.critical("[Supervisor] Inference restart budget exhausted. Stopping pipeline.")
+                    break
+
+            # Supervisor: camera workers (per-camera recovery)
+            for cam_id, proc in list(worker_processes.items()):
+                if cam_id in worker_restart_exhausted:
+                    continue
+                if proc.is_alive():
+                    continue
+
+                if (loop_now - worker_last_restart_ts.get(cam_id, 0.0)) < restart_cooldown_sec:
+                    continue
+
+                hist = worker_restart_histories.get(cam_id)
+                if hist is None:
+                    hist = deque()
+                    worker_restart_histories[cam_id] = hist
+
+                if not _restart_allowed(hist, max_restarts_per_minute):
+                    worker_restart_exhausted.add(cam_id)
+                    logger.critical(f"[Supervisor] Worker {cam_id} restart budget exhausted.")
+                    continue
+
+                logger.error(f"[Supervisor] Worker {cam_id} died. Restarting...")
+                _terminate_process(proc, f"worker_{cam_id}")
+                worker_last_restart_ts[cam_id] = loop_now
+                _spawn_worker(cam_id)
+
             # Drain output queue
             events_batch = []
             for _ in range(50):
@@ -462,10 +630,61 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                     except Exception:
                         pass
 
+            # Adaptive frame-skip to keep system responsive under load spikes.
+            if auto_degrade_enabled:
+                lag_samples = []
+                for cam_id, m in camera_metrics.items():
+                    if cam_id in worker_restart_exhausted:
+                        continue
+                    lag_val = m.get("queue_lag_ema_ms")
+                    if lag_val is None:
+                        continue
+                    lag_num = float(lag_val)
+                    if lag_num > 0:
+                        lag_samples.append(lag_num)
+
+                if lag_samples:
+                    avg_lag_ms = sum(lag_samples) / len(lag_samples)
+                    if avg_lag_ms >= auto_degrade_lag_high_ms:
+                        high_lag_streak += 1
+                        low_lag_streak = 0
+                    elif avg_lag_ms <= auto_degrade_lag_low_ms:
+                        low_lag_streak += 1
+                        high_lag_streak = 0
+                    else:
+                        high_lag_streak = 0
+                        low_lag_streak = 0
+
+                    current_skip = int(frame_skip_control.value)
+                    if high_lag_streak >= auto_degrade_high_streak_target and current_skip < auto_degrade_max_skip:
+                        frame_skip_control.value = current_skip + 1
+                        logger.warning(
+                            f"[AutoDegrade] High lag avg={avg_lag_ms:.1f}ms "
+                            f"-> frame_skip {current_skip} -> {int(frame_skip_control.value)}"
+                        )
+                        high_lag_streak = 0
+                        low_lag_streak = 0
+                    elif low_lag_streak >= auto_degrade_low_streak_target and current_skip > frame_skip_base:
+                        frame_skip_control.value = current_skip - 1
+                        logger.info(
+                            f"[AutoDegrade] Lag recovered avg={avg_lag_ms:.1f}ms "
+                            f"-> frame_skip {current_skip} -> {int(frame_skip_control.value)}"
+                        )
+                        high_lag_streak = 0
+                        low_lag_streak = 0
+
             health_now = time.time()
             health_payload = {
                 "timestamp": health_now,
                 "outlet_id": outlet_id,
+                "frame_skip": int(frame_skip_control.value),
+                "base_frame_skip": int(frame_skip_base),
+                "auto_degrade_enabled": auto_degrade_enabled,
+                "supervisor": {
+                    "inference_alive": p_server.is_alive(),
+                    "inference_restarts_last_minute": len(inference_restart_history),
+                    "worker_restart_exhausted": sorted(worker_restart_exhausted),
+                },
                 "cameras": [],
             }
             for cam_id, src in source_by_camera.items():
@@ -479,6 +698,8 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
 
                 last_result_ts = float(m.get("last_result_ts") or 0.0)
                 result_age_sec = None if last_result_ts <= 0 else max(0.0, health_now - last_result_ts)
+                if result_age_sec is None or result_age_sec > 2.0:
+                    processed_fps = 0.0
 
                 if result_age_sec is None or result_age_sec > 10.0:
                     status = "OFFLINE"
@@ -487,11 +708,21 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
                 else:
                     status = "LIVE"
 
+                worker_alive = False
+                proc = worker_processes.get(cam_id)
+                if proc is not None:
+                    worker_alive = proc.is_alive()
+                if cam_id in worker_restart_exhausted:
+                    status = "OFFLINE"
+
                 health_payload["cameras"].append(
                     {
                         "camera_id": cam_id,
                         "source_type": m.get("source_type", _source_type(src)),
                         "status": status,
+                        "worker_alive": worker_alive,
+                        "restart_exhausted": cam_id in worker_restart_exhausted,
+                        "worker_restarts_last_minute": len(worker_restart_histories.get(cam_id, deque())),
                         "processed_fps": round(processed_fps, 2),
                         "inference_time_ms": round(float(m.get("inference_time_ema_ms") or 0.0), 1),
                         "queue_lag_ms": round(float(m.get("queue_lag_ema_ms") or 0.0), 1),
@@ -503,17 +734,15 @@ def run_outlet(preview: bool = False, force_simulate: bool = False):
             _safe_write_json(health_path, health_payload)
             
             aggregator.dump_state(state_path)
-            
-            if not p_server.is_alive():
-                logger.error("Inference Died")
-                break
                 
             time.sleep(settings.runtime.main_loop_sleep_sec)
 
     except KeyboardInterrupt:
         logger.info("Stopping...")
     finally:
-        for p in processes: p.terminate()
+        _terminate_process(p_server, "inference_server")
+        for cam_id, proc in worker_processes.items():
+            _terminate_process(proc, f"worker_{cam_id}")
         for buf in shared_buffers.values():
             buf.close()
             buf.unlink()
@@ -524,6 +753,11 @@ if __name__ == "__main__":
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--no-preview", action="store_true")
     parser.add_argument("--simulate", action="store_true")
+    parser.add_argument("--config", type=str, default=None)
     args = parser.parse_args()
     
-    run_outlet(preview=(args.preview and not args.no_preview), force_simulate=args.simulate)
+    run_outlet(
+        preview=(args.preview and not args.no_preview),
+        force_simulate=args.simulate,
+        config_path=args.config,
+    )
