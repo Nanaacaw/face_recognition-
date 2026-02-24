@@ -1,6 +1,7 @@
 import random
 import re
 import time
+import os
 
 import cv2
 
@@ -39,6 +40,7 @@ class RTSPReader:
         self.loop = loop
 
     def _open_capture(self) -> cv2.VideoCapture:
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
         cap = cv2.VideoCapture(self.rtsp_url)
         try:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
