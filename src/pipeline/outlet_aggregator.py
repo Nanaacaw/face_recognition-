@@ -79,7 +79,7 @@ class OutletAggregator:
                             camera_id="aggregator",
                             spg_id=spg_id,
                             details={
-                                "reason": "startup_absence_never_arrived",
+                                "reason": "SPG tidak terlihat dari awal (never_seen)",
                                 "seconds_since_startup": int(now - self.start_time)
                             }
                         )
@@ -103,7 +103,7 @@ class OutletAggregator:
                         spg_id=spg_id,
                         name=self.spg_names.get(spg_id),
                         details={
-                            "reason": "global_absence",
+                            "reason": "SPG tidak terlihat di area.",
                             "seconds_since_last_seen": int(time_diff)
                         }
                     )
