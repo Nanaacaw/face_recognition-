@@ -78,6 +78,7 @@ class OutletAggregator:
                             outlet_id=self.outlet_id,
                             camera_id="aggregator",
                             spg_id=spg_id,
+                            name=self.spg_names.get(spg_id),
                             details={
                                 "reason": "SPG tidak terlihat dari awal (never_seen)",
                                 "seconds_since_startup": int(now - self.start_time)
