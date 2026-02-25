@@ -23,6 +23,8 @@ from src.settings.settings import load_settings
 from src.settings.logger import logger
 from src.storage.snapshot_cleaner import SnapshotCleaner
 
+from src.storage.snapshot_store import SnapshotStore
+
 _UNRESOLVED_ENV_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|%[A-Za-z_][A-Za-z0-9_]*%")
 
 
@@ -468,6 +470,7 @@ def run_outlet(
     )
     
     event_stores = {cid: EventStore(d) for cid, d in cam_dirs.items()}
+    snapshot_store = SnapshotStore(settings.storage.data_dir) # Initialize snapshot store
     source_by_camera = {cam_id: src for cam_id, src in camera_sources}
     camera_metrics = {
         cam_id: {
@@ -504,6 +507,20 @@ def run_outlet(
                 retry_backoff_base_sec=settings.notification.retry_backoff_base_sec,
                 retry_after_default_sec=settings.notification.retry_after_default_sec,
             )
+            # Send startup signal
+            mode_str = "SIMULATION" if use_simulation else "PRODUCTION"
+            startup_msg = (
+                f"🟢 **Monitoring Started**\n"
+                f"Outlet: {outlet_id}\n"
+                f"Mode: {mode_str}\n"
+                f"Cameras: {len(camera_sources)}\n"
+                f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            try:
+                notifier.send_message(startup_msg)
+            except Exception as e:
+                logger.warning(f"Failed to send startup telegram: {e}")
+
         except Exception as e:
             logger.warning(f"Telegram notifier disabled: {e}")
     else:
@@ -517,7 +534,7 @@ def run_outlet(
         while True:
             loop_now = time.time()
 
-            # Supervisor: inference process
+            # Inference process
             if not p_server.is_alive():
                 if (loop_now - inference_last_restart_ts) >= restart_cooldown_sec and _restart_allowed(
                     inference_restart_history, max_restarts_per_minute
@@ -530,7 +547,7 @@ def run_outlet(
                     logger.critical("[Supervisor] Inference restart budget exhausted. Stopping pipeline.")
                     break
 
-            # Supervisor: camera workers (per-camera recovery)
+            # Camera workers (per-camera recovery)
             for cam_id, proc in list(worker_processes.items()):
                 if cam_id in worker_restart_exhausted:
                     continue
@@ -627,10 +644,26 @@ def run_outlet(
                 if notifier:
                     try:
                         notifier.send_message(txt)
-                    except Exception:
+
+                        snapshot_path = None
+                        for cid in cam_dirs:
+                             possible_path = os.path.join(cam_dirs[cid], "snapshots", "latest_frame.jpg")
+                             if os.path.exists(possible_path):
+                                 try:
+                                     frame = cv2.imread(possible_path)
+                                     if frame is not None:
+                                         snapshot_path = snapshot_store.save_alert_frame(outlet_id, cid, frame)
+                                         break
+                                 except Exception:
+                                     pass
+                        
+                        if snapshot_path:
+                            notifier.send_photo(snapshot_path, caption=f"📸 Snapshot at {ts_str}")
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to send telegram alert: {e}")
                         pass
 
-            # Adaptive frame-skip to keep system responsive under load spikes.
             if auto_degrade_enabled:
                 lag_samples = []
                 for cam_id, m in camera_metrics.items():

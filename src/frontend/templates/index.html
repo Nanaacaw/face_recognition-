@@ -138,7 +138,8 @@
                             <div class="px-4 py-2 text-xs font-bold uppercase tracking-wide flex justify-between items-center"
                                  :class="{
                                      'bg-green-50 text-green-700': spg.status === 'PRESENT',
-                                     'bg-red-50 text-red-700': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
+                                     'bg-red-50 text-red-700': spg.status === 'ABSENT',
+                                     'bg-orange-50 text-orange-700': spg.status === 'NEVER_ARRIVED',
                                      'bg-gray-50 text-gray-600': spg.status === 'NOT_SEEN_YET'
                                  }">
                                 <span x-text="spg.status.replace('_', ' ')"></span>
@@ -158,7 +159,7 @@
                                     <p class="text-xs text-gray-500 truncate" x-text="'ID: ' + spg.id"></p>
                                     <div class="mt-2 flex items-center text-xs text-gray-500">
                                         <span class="mr-1">Last seen:</span>
-                                        <span x-text="spg.last_seen_ts ? new Date(spg.last_seen_ts * 1000).toLocaleTimeString() : '-'"></span>
+                                        <span x-text="formatRelativeTime(spg.last_seen_ts)"></span>
                                     </div>
                                 </div>
                             </div>
@@ -317,6 +318,18 @@
                 formatAge(value) {
                     if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
                     return `${Number(value).toFixed(1)}s`;
+                },
+                
+                formatRelativeTime(ts) {
+                    if (!ts) return '-';
+                    const now = Date.now() / 1000;
+                    const diff = now - ts;
+                    
+                    if (diff < 10) return 'Just now';
+                    if (diff < 60) return `${Math.floor(diff)}s ago`;
+                    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+                    return new Date(ts * 1000).toLocaleTimeString();
                 }
             };
         }
