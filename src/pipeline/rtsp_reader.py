@@ -40,7 +40,8 @@ class RTSPReader:
         self.loop = loop
 
     def _open_capture(self) -> cv2.VideoCapture:
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        # Force FFmpeg to use TCP for RTSP and minimize buffering for low latency
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay"
         cap = cv2.VideoCapture(self.rtsp_url)
         try:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)

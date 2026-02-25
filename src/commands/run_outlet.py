@@ -206,14 +206,25 @@ def worker_camera_capture(
                         inf_frame = frame
                         h, w = inf_frame.shape[:2]
                         bbox_scale = 1.0
+                        
                         if h > shm_max_h or w > shm_max_w:
                             bbox_scale = min(shm_max_h / h, shm_max_w / w)
                             inf_frame = cv2.resize(inf_frame, (int(w * bbox_scale), int(h * bbox_scale)))
+                        
                         shm_buf.write(inf_frame, frame_id, now)
                         input_queue.put((camera_id, frame_id, now), timeout=0.1)
                     else:
+                        inf_frame = frame
+                        h, w = inf_frame.shape[:2]
                         bbox_scale = 1.0
-                        input_queue.put((camera_id, frame_id, frame, now), timeout=0.1)
+                        # Hard limit for Queue mode to avoid OOM/Slow pickle
+                        QUEUE_MAX_W = 1280
+                        QUEUE_MAX_H = 720
+                        if h > QUEUE_MAX_H or w > QUEUE_MAX_W:
+                            bbox_scale = min(QUEUE_MAX_H / h, QUEUE_MAX_W / w)
+                            inf_frame = cv2.resize(inf_frame, (int(w * bbox_scale), int(h * bbox_scale)))
+                            
+                        input_queue.put((camera_id, frame_id, inf_frame, now), timeout=0.1)
                 except queue.Full:
                     pass
                 except Exception:
