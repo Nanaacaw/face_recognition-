@@ -20,6 +20,21 @@ if not os.path.exists(DATA_DIR):
     print(f"Warning: {DATA_DIR} does not exist yet. Dashboard might be empty.")
     os.makedirs(DATA_DIR, exist_ok=True)
 
+
+def _get_configured_camera_ids() -> set[str]:
+    """Return a set of camera IDs present in the current configuration."""
+    ids = set()
+    if SETTINGS.outlet and SETTINGS.outlet.cameras:
+        for cam in SETTINGS.outlet.cameras:
+            if cam.id:
+                ids.add(cam.id)
+    
+    if SETTINGS.target and SETTINGS.target.camera_id:
+        ids.add(SETTINGS.target.camera_id)
+        
+    return ids
+
+
 app = FastAPI(title="SPG Dashboard", version="2.0")
 
 app.add_middleware(
@@ -70,7 +85,14 @@ def get_recent_events(limit: int | None = None):
     pattern = os.path.join(DATA_DIR, "cam_*", "events.jsonl")
     files = glob.glob(pattern)
 
+    active_ids = _get_configured_camera_ids()
+    valid_files = []
     for ef in files:
+        cam_id = os.path.basename(os.path.dirname(ef))
+        if cam_id in active_ids:
+            valid_files.append(ef)
+            
+    for ef in valid_files:
         cam_id = os.path.basename(os.path.dirname(ef))
         try:
             with open(ef, "r", encoding="utf-8") as f:
@@ -148,11 +170,16 @@ async def api_snapshot(spg_id: str):
 @app.get("/api/cameras")
 async def api_cameras():
     cams = []
+    active_ids = _get_configured_camera_ids()
+    
     pattern = os.path.join(DATA_DIR, "cam_*")
     dirs = glob.glob(pattern)
     for d in dirs:
         if os.path.isdir(d):
             cam_id = os.path.basename(d)
+            if cam_id not in active_ids:
+                continue
+            
             cams.append({
                 "id": cam_id,
                 "stream_url": f"/stream/{cam_id}",
@@ -174,7 +201,6 @@ async def mjpeg_generator(cam_id: str, request: Request, filename: str):
             try:
                 with open(file_path, "rb") as f:
                     candidate = f.read()
-                # Basic JPEG integrity guard to avoid serving partial writes.
                 if candidate.startswith(b"\xff\xd8") and candidate.endswith(b"\xff\xd9"):
                     frame_data = candidate
                     last_good_frame = candidate

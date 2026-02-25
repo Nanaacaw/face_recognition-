@@ -23,6 +23,7 @@ def main() -> None:
         host=settings.dashboard.host,
         port=settings.dashboard.port,
         reload=settings.dashboard.reload,
+        reload_includes=["*.yaml", "configs/*.yaml"],
     )
 
 
