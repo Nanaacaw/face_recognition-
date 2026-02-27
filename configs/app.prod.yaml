@@ -1,12 +1,15 @@
 camera:
   source: webcam
   webcam_index: 0
-  process_fps: 5
+  process_fps: 6
   preview: true
 
 recognition:
   threshold: 0.45
   min_consecutive_hits: 2
+  model_name: "buffalo_s"
+  execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+  det_size: [640, 640]
 
 presence:
   grace_seconds: 20
@@ -16,8 +19,50 @@ storage:
   data_dir: "./data"
   snapshot_enabled: true
   snapshot_retention_days: 14
+  sim_output_subdir: "sim_output"
+  gallery_subdir: "gallery"
 
 target:
   spg_ids: ["001"]
   outlet_id: "OUTLET_DEV"
   camera_id: "CAM_DEV_01"
+
+inference:
+  frame_skip: 1
+  max_frame_height: 720
+  max_frame_width: 1280
+
+notification:
+  telegram_enabled: true
+  telegram_bot_token_env: "SPG_TELEGRAM_BOT_TOKEN"
+  telegram_chat_id_env: "SPG_TELEGRAM_CHAT_ID"
+  timeout_sec: 15
+  max_retries: 3
+  retry_backoff_base_sec: 2
+  retry_after_default_sec: 5
+
+runtime:
+  worker_idle_sleep_sec: 0.05
+  main_loop_sleep_sec: 0.05
+  supervisor_restart_cooldown_sec: 5.0
+  supervisor_max_restarts_per_minute: 10
+  auto_degrade_enabled: true
+  auto_degrade_lag_high_ms: 500
+  auto_degrade_lag_low_ms: 220
+  auto_degrade_high_streak: 25
+  auto_degrade_low_streak: 50
+  auto_degrade_max_frame_skip: 3
+  preview_raw_enabled: false
+  preview_frame_save_interval_sec: 0.2
+  preview_frame_width: 480
+  preview_jpeg_quality: 70
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  live_window_seconds: 10
+  recent_events_limit: 50
+  stream_frame_interval_sec: 0.2
+  stream_error_sleep_sec: 0.5
+  stream_missing_frame_sleep_sec: 1.0

@@ -1,73 +1,73 @@
 # Dashboard Monitoring
 
-Dashboard realtime untuk monitoring kehadiran SPG di outlet.
+Dashboard digunakan untuk monitoring realtime dan manajemen SPG.
 
-## Quick Start
+## 1. Run
+
+Demo:
 
 ```bash
-# Terminal 1: Jalankan simulasi (Opsional, jika ingin data dummy)
-make simulate-light
-
-# Terminal 2: Buka dashboard
-python -m src.frontend.main
+make dashboard-demo
 ```
 
-Dashboard akan terbuka otomatis di browser pada `http://localhost:8000`.
+Staging:
 
-## Fitur
-
-### 1. Monitoring (Realtime)
-Halaman utama (`/`) menampilkan status kehadiran SPG.
-
-- **Status Badge**:
-  - 🟢 PRESENT — Aktif terdeteksi
-  - 🔴 ABSENT — Hilang setelah sebelumnya hadir
-  - 🟠 NEVER ARRIVED — Tidak pernah terdeteksi sejak startup
-  - ⚪ WAITING — Masih dalam grace period
-- **Event Log**: Tabel log aktivitas terbaru dari semua kamera.
-- **Camera Stream**: Klik "Show Cameras" untuk melihat feed MJPEG (jika tersedia).
-
-### 2. Manage SPG (Enrollment)
-Halaman baru (`/manage`) untuk mendaftarkan wajah SPG.
-
-**Cara Enroll:**
-1.  Klik menu **"👥 Manage SPG"** di pojok kanan atas.
-2.  Isi **SPG ID** dan **Nama**.
-3.  Pilih Metode:
-    - **📁 Upload Foto**: Drag & drop 1-5 file foto wajah.
-    - **📹 Webcam**: Gunakan kamera laptop/PC untuk capture wajah langsung.
-4.  Klik **"Daftarkan SPG"**.
-
-> **Note:**
-> - Pastikan pencahayaan cukup terang.
-> - Wajah harus menghadap kamera.
-> - Sistem otomatis mendeteksi wajah terbaik dari foto yang diupload.
-
-**Hapus SPG:**
-Klik tombol **🗑️ Hapus** pada tabel daftar SPG untuk menghapus data permanent (json + foto).
-
-## Arsitektur
-
-```
-[Browser] <──> [FastAPI (main.py)] <──> [GalleryStore]
-                        │
-                        ▼
-                 [FaceDetector] (Singleton)
+```bash
+make dashboard-staging
 ```
 
-- **Backend**: FastAPI
-- **Frontend**: Jinja2 Templates + Alpine.js + Tailwind CSS
-- **Storage**: JSON-based (`data/gallery/*.json`)
+Production:
 
-## Konfigurasi
-
-Semua parameter (Model, Threshold, Camera) diatur di `configs/app.dev.yaml`.
-
-```yaml
-recognition:
-  model_name: "buffalo_l"       # Model deteksi (buffalo_s / buffalo_l)
-  det_size: [640, 640]          # Ukuran input deteksi
-  execution_providers:
-  - "CUDAExecutionProvider"     # Prioritas GPU
-  - "CPUExecutionProvider"
+```bash
+make dashboard-prod
 ```
+
+Default URL: `http://localhost:8000`
+
+## 2. Main Features
+
+- Outlet status (`LIVE` / `OFFLINE`)
+- Personnel cards (`PRESENT`, `ABSENT`, `NEVER_ARRIVED`, `NOT_SEEN_YET`)
+- Recent events feed
+- Camera health cards:
+  - status
+  - processed fps
+  - inference ms
+  - queue lag ms
+  - age
+- Live camera feed (AI overlay MJPEG)
+
+## 3. Stream Behavior
+
+- UI menampilkan AI view saja (raw view dihapus untuk fokus demo).
+- Endpoint stream:
+  - `/stream/{cam_id}`
+  - `/stream_raw/{cam_id}` (masih tersedia backend, tidak ditampilkan di UI utama)
+- Stream stabilisasi:
+  - preview writer atomic file replace
+  - last-good-frame fallback di API
+  - response header no-cache
+
+## 4. API Endpoints
+
+- `GET /api/state`
+- `GET /api/events`
+- `GET /api/health`
+- `GET /api/cameras`
+- `GET /api/snapshot/{spg_id}`
+- `GET /api/gallery`
+- `POST /api/gallery/enroll`
+- `DELETE /api/gallery/{spg_id}`
+
+## 5. Manage SPG
+
+Halaman `/manage` mendukung:
+
+- enroll via upload foto
+- daftar gallery
+- hapus SPG
+
+## 6. Notes
+
+- Dashboard membaca data pipeline dari `data/<sim_output_subdir>`.
+- Jika pipeline belum jalan, dashboard tetap bisa terbuka tetapi data kosong/offline.

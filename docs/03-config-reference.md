@@ -1,263 +1,245 @@
-# face_recog — Configuration Reference
+# Configuration Reference
 
-Semua konfigurasi sistem dibaca dari:
+Semua runtime behavior dibaca dari YAML config + env variables.
 
-configs/app.<env>.yaml
+## 1. Config Resolution
 
-Environment:
-- dev
-- staging
-- prod
+Urutan prioritas:
 
-Secrets (Telegram) harus dibaca dari environment variables.
+1. `APP_CONFIG_PATH`
+2. `APP_ENV` -> `configs/app.<env>.yaml`
+3. default `dev`
 
----
+## 2. camera
 
-# 1) camera
+### `camera.source`
 
-## camera.source
-Type: string  
-Allowed: "webcam" | "rtsp"  
-Description:
-Menentukan sumber video.
+- Type: `string`
+- Allowed: `webcam | rtsp`
 
----
+### `camera.webcam_index`
 
-## camera.webcam_index
-Type: int  
-Default: 0  
-Used when: source = webcam  
-Description:
-Index device webcam pada sistem Windows.
+- Type: `int | null`
+- Dipakai saat `camera.source=webcam`
 
----
+### `camera.rtsp_url`
 
-## camera.rtsp_url
-Type: string  
-Used when: source = rtsp  
-Description:
-RTSP URL stream kamera.
+- Type: `string | null`
+- Dipakai saat `camera.source=rtsp`
+- Rekomendasi: `${RTSP_CAM_01_URL}`
 
----
+### `camera.process_fps`
 
-## camera.process_fps
-Type: int  
-Recommended: 3–5  
-Description:
-Berapa fps diproses untuk recognition.
-Frame lain boleh di-drop untuk menjaga performa.
+- Type: `int`
+- Fungsi: membatasi rate frame yang diproses pipeline
 
-Impact:
-- Terlalu tinggi → CPU naik
-- Terlalu rendah → detection delay
+### `camera.preview`
 
----
+- Type: `bool`
+- Menyalakan preview OpenCV window
 
-## camera.preview
-Type: boolean  
-Description:
-Jika true, tampilkan OpenCV preview window.
-Biasanya true di dev, false di prod.
+## 3. recognition
 
----
+### `recognition.threshold`
 
-# 2) recognition
+- Type: `float`
 
-## recognition.threshold
-Type: float (0.0–1.0)  
-Typical: 0.40–0.55  
+### `recognition.min_consecutive_hits`
 
-Description:
-Minimum similarity agar dianggap match.
+- Type: `int`
 
-Lower value:
-- Lebih toleran
-- Risiko false positive naik
+### `recognition.model_name`
 
-Higher value:
-- Lebih ketat
-- Risiko false negative naik
+- Type: `string`
+- Default: `buffalo_s`
 
-Must be tuned in staging.
+### `recognition.execution_providers`
 
----
+- Type: `list[string]`
+- Contoh: `["CUDAExecutionProvider", "CPUExecutionProvider"]`
 
-## recognition.model_name
-Type: string
-Default: "buffalo_s"
-Allowed: "buffalo_s" | "buffalo_l"
+### `recognition.det_size`
 
-Description:
-Model deteksi wajah yang digunakan.
-- `buffalo_s`: Lebih cepat (MobileFaceNet), akurasi standar.
-- `buffalo_l`: Lebih akurat (ResNet50), lebih berat.
+- Type: `list[int, int]` atau `tuple[int, int]`
 
----
+## 4. presence
 
-## recognition.det_size
-Type: list[int, int]
-Default: [640, 640]
+### `presence.grace_seconds`
 
-Description:
-Ukuran input gambar untuk deteksi wajah.
-Resolusi lebih tinggi = deteksi wajah kecil lebih baik, tapi lebih lambat.
+- Type: `int`
 
----
+### `presence.absent_seconds`
 
-## recognition.execution_providers
-Type: list[string]
-Default: ["CUDAExecutionProvider", "CPUExecutionProvider"]
+- Type: `int`
 
-Description:
-Urutan prioritas hardware acceleration (ONNX Runtime).
-Jika CUDA tidak tersedia, otomatis fallback ke CPU.
+## 5. storage
 
----
+### `storage.data_dir`
 
-## recognition.min_consecutive_hits
-Type: int  
-Recommended: 2–3  
+- Type: `string`
 
-Description:
-Jumlah hit berturut-turut sebelum dianggap valid SPG_SEEN.
+### `storage.snapshot_enabled`
 
-Purpose:
-Mengurangi noise dan false detection satu frame.
+- Type: `bool`
 
----
+### `storage.snapshot_retention_days`
 
-# 3) presence
+- Type: `int`
 
-## presence.grace_seconds
-Type: int  
-Recommended: 15–30  
+### `storage.sim_output_subdir`
 
-Description:
-Toleransi waktu hilang sementara (misalnya tertutup orang).
+- Type: `string`
+- Default: `sim_output`
 
-Jika SPG tidak terlihat kurang dari waktu ini,
-status tetap dianggap PRESENT.
+### `storage.gallery_subdir`
 
----
+- Type: `string`
+- Default: `gallery`
 
-## presence.absent_seconds
-Type: int  
-Default: 300 (5 menit)  
+## 6. target (single-camera mode)
 
-Description:
-Batas waktu tidak terlihat sebelum alert dikirim.
+### `target.spg_ids`
 
-If:
-now - last_seen > absent_seconds
-→ ABSENT_ALERT_FIRED
+- Type: `list[string]`
 
----
+### `target.outlet_id`
 
-# 4) storage
+- Type: `string`
 
-## storage.data_dir
-Type: string  
-Default: "./data"  
+### `target.camera_id`
 
-Description:
-Root folder untuk:
-- gallery
-- snapshots
-- events.jsonl
+- Type: `string`
 
----
+## 7. outlet (multi-camera mode)
 
-## storage.snapshot_enabled
-Type: boolean  
-Description:
-Jika true, sistem menyimpan snapshot saat alert.
+### `outlet.id`
 
----
+- Type: `string`
 
-## storage.snapshot_retention_days
-Type: int  
-Recommended:
-- dev: 3–7
-- prod: 7–30
+### `outlet.name`
 
-Description:
-Berapa hari snapshot disimpan sebelum dihapus.
+- Type: `string`
 
----
+### `outlet.cameras`
 
-# 5) target
+- Type: `list[{id, rtsp_url}]`
+- Untuk security, isi `rtsp_url` dari env placeholder.
 
-## target.spg_ids
-Type: list[string]  
+### `outlet.target_spg_ids`
 
-Description:
-Daftar SPG yang dimonitor.
+- Type: `list[string]`
 
-MVP:
-Biasanya hanya 1 SPG per kamera.
+## 8. inference
 
-Future:
-Bisa multi-SPG.
+### `inference.frame_skip`
 
----
+- Type: `int`
+- `0` = proses semua frame
 
-## target.outlet_id
-Type: string  
-Description:
-Identifier outlet.
+### `inference.max_frame_height`
 
-Dicatat di event log dan Telegram.
+- Type: `int`
 
----
+### `inference.max_frame_width`
 
-## target.camera_id
-Type: string  
-Description:
-Identifier kamera.
+- Type: `int`
 
-Dicatat di event log dan Telegram.
+## 9. notification
 
----
+### `notification.telegram_enabled`
 
-# 6) Environment Variables (Secrets)
+- Type: `bool`
 
-Must exist in system environment:
+### `notification.telegram_bot_token_env`
 
-- TELEGRAM_BOT_TOKEN
-- TELEGRAM_CHAT_ID
-- APP_ENV (dev/staging/prod)
+- Type: `string`
+- Default: `SPG_TELEGRAM_BOT_TOKEN`
 
-These must NEVER be committed to Git.
+### `notification.telegram_chat_id_env`
 
----
+- Type: `string`
+- Default: `SPG_TELEGRAM_CHAT_ID`
 
-# 7) Config Philosophy
+### `notification.timeout_sec`
 
-Rules:
-- Semua parameter yang mungkin berubah harus ada di config.
-- Tidak boleh hardcode threshold di source code.
-- Tidak boleh conditional logic berdasarkan ENV di kode.
-- Perbedaan behavior harus berasal dari config file.
+- Type: `int`
 
----
+### `notification.max_retries`
 
-# 8) Tuning Strategy
+- Type: `int`
 
-Tuning order:
+### `notification.retry_backoff_base_sec`
 
-1. Adjust recognition.threshold
-2. Adjust min_consecutive_hits
-3. Adjust grace_seconds
-4. Adjust process_fps
+- Type: `int`
 
-Never tune everything at once.
+### `notification.retry_after_default_sec`
 
-# 9) Multi-Camera Deployment Strategy
-Per camera:
-configs/mkg_cam01.yaml
-configs/mkg_cam02.yaml
-...
+- Type: `int`
 
-Per outlet aggregator dijalankan dengan:
-aggregate --data_dirs data_cam01 data_cam02 ...
-(Jumlah kamera fleksibel (2–5+))
+## 10. runtime
+
+### Loop
+
+- `runtime.worker_idle_sleep_sec` (`float`)
+- `runtime.main_loop_sleep_sec` (`float`)
+
+### Supervisor (self-healing)
+
+- `runtime.supervisor_restart_cooldown_sec` (`float`)
+- `runtime.supervisor_max_restarts_per_minute` (`int`)
+
+### Adaptive degrade
+
+- `runtime.auto_degrade_enabled` (`bool`)
+- `runtime.auto_degrade_lag_high_ms` (`float`)
+- `runtime.auto_degrade_lag_low_ms` (`float`)
+- `runtime.auto_degrade_high_streak` (`int`)
+- `runtime.auto_degrade_low_streak` (`int`)
+- `runtime.auto_degrade_max_frame_skip` (`int`)
+
+### Preview persistence
+
+- `runtime.preview_raw_enabled` (`bool`)
+- `runtime.preview_frame_save_interval_sec` (`float`)
+- `runtime.preview_frame_width` (`int`)
+- `runtime.preview_jpeg_quality` (`int`)
+
+## 11. dashboard
+
+- `dashboard.host` (`string`)
+- `dashboard.port` (`int`)
+- `dashboard.reload` (`bool`)
+- `dashboard.live_window_seconds` (`int`)
+- `dashboard.recent_events_limit` (`int`)
+- `dashboard.stream_frame_interval_sec` (`float`)
+- `dashboard.stream_error_sleep_sec` (`float`)
+- `dashboard.stream_missing_frame_sleep_sec` (`float`)
+
+## 12. Required Environment Variables
+
+- `RTSP_CAM_01_URL`
+- `RTSP_CAM_02_URL`
+- `RTSP_CAM_03_URL`
+- `RTSP_CAM_04_URL`
+
+Optional:
+
+- `SPG_TELEGRAM_BOT_TOKEN`
+- `SPG_TELEGRAM_CHAT_ID`
+- `APP_ENV`
+- `APP_CONFIG_PATH`
+
+## 13. Profile Recommendations
+
+### Demo
+
+- `process_fps` lebih tinggi
+- `frame_skip` dasar rendah (`0`)
+- stream interval lebih cepat
+
+### Production
+
+- `process_fps` moderat
+- `frame_skip` dasar `1`
+- auto-degrade tetap aktif untuk spike handling
+- preview width/quality lebih hemat

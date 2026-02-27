@@ -1,45 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SPG Outlet Monitoring</title>
-
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
     <style>
-        [x-cloak] {
-            display: none !important;
-        }
-
-        .glass {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
+        [x-cloak] { display: none !important; }
+        .modal-backdrop {
+            background: rgba(0, 0, 0, 0.85);
+            -webkit-backdrop-filter: blur(4px);
+            backdrop-filter: blur(4px);
         }
     </style>
 </head>
-
 <body class="bg-gray-100 text-gray-800 font-sans" x-data="dashboard()">
-
-    <!-- Navbar -->
     <nav class="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
-                    <div class="flex-shrink-0 flex items-center">
-                        <span class="text-2xl mr-2">🏪</span>
-                        <h1 class="text-xl font-bold text-gray-900" x-text="state.outlet_id || 'Loading...'"></h1>
-                    </div>
+                    <h1 class="text-xl font-bold text-gray-900" x-text="state.outlet_id || 'Loading...'"></h1>
                     <div class="ml-6 flex items-center space-x-4">
                         <span class="px-3 py-1 rounded-full text-xs font-medium"
-                            :class="systemStatus === 'LIVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                              :class="systemStatus === 'LIVE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
                             <span class="w-2 h-2 rounded-full inline-block mr-1"
-                                :class="systemStatus === 'LIVE' ? 'bg-green-500' : 'bg-red-500'"></span>
+                                  :class="systemStatus === 'LIVE' ? 'bg-green-500' : 'bg-red-500'"></span>
                             <span x-text="systemStatus"></span>
                         </span>
                         <span class="text-xs text-gray-500" x-text="'Last Update: ' + lastUpdate"></span>
@@ -47,10 +33,9 @@
                 </div>
                 <div class="flex items-center space-x-4">
                     <a href="/manage" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
-                        👥 Manage SPG
+                        Manage SPG
                     </a>
-                    <button @click="toggleCameras()"
-                        class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+                    <button type="button" @click="toggleCameras()" class="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors" title="Toggle camera visibility">
                         <span x-text="showCameras ? 'Hide Cameras' : 'Show Cameras'"></span>
                     </button>
                 </div>
@@ -59,105 +44,122 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        <!-- Stats Row -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <!-- Total -->
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
                 <div class="text-sm font-medium text-gray-500">Total Personnel</div>
                 <div class="mt-2 text-3xl font-bold text-gray-900" x-text="stats.total">0</div>
             </div>
-            <!-- Present -->
             <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
                 <div class="text-sm font-medium text-gray-500">Present</div>
                 <div class="mt-2 text-3xl font-bold text-green-600" x-text="stats.present">0</div>
             </div>
-            <!-- Absent -->
             <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-red-500">
                 <div class="text-sm font-medium text-gray-500">Absent</div>
                 <div class="mt-2 text-3xl font-bold text-red-600" x-text="stats.absent">0</div>
             </div>
-            <!-- Attendance Rate -->
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
                 <div class="text-sm font-medium text-gray-500">Attendance Rate</div>
                 <div class="mt-2 text-3xl font-bold text-blue-600" x-text="stats.rate + '%'">0%</div>
             </div>
         </div>
 
-        <!-- Camera Section (Toggleable) -->
         <div x-show="showCameras" x-transition.duration.300ms class="mb-8">
             <h2 class="text-lg font-bold text-gray-900 mb-4 flex items-center">
-                <span>📹 Live Feeds</span>
-                <span class="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded">MJPEG (Low
-                    Latency)</span>
+                <span>Live Feeds</span>
+                <span class="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded">AI stream (MJPEG)</span>
             </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <template x-for="cam in cameras" :key="cam.id">
-                    <div class="bg-black rounded-lg overflow-hidden shadow-lg relative aspect-video group">
-                        <img :src="cam.url" class="w-full h-full object-cover" alt="Camera Feed">
-                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                    <div class="bg-black rounded-lg overflow-hidden shadow-lg relative aspect-video group cursor-pointer"
+                         @click="openCameraModal(cam)">
+                        <img :src="cam.ai_url" class="w-full h-full object-cover" alt="Camera Feed">
+                        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex justify-between items-center">
                             <span class="text-white text-sm font-mono" x-text="cam.id"></span>
+                            <span class="text-white/60 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                                Open live view
+                            </span>
                         </div>
                     </div>
                 </template>
                 <div x-show="cameras.length === 0"
-                    class="col-span-full bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center text-gray-500">
+                     class="col-span-full bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center text-gray-500">
                     No active cameras detected.
                 </div>
             </div>
         </div>
 
-        <!-- Main Content Grid -->
+        <div class="mb-8">
+            <h2 class="text-lg font-bold text-gray-900 mb-4">Camera Health</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="cam in cameraHealth" :key="cam.camera_id">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="font-mono text-sm text-gray-900" x-text="cam.camera_id"></div>
+                            <span class="px-2 py-0.5 rounded text-xs font-medium" :class="{
+                                'bg-green-100 text-green-800': cam.status === 'LIVE',
+                                'bg-yellow-100 text-yellow-800': cam.status === 'STALE',
+                                'bg-red-100 text-red-800': cam.status === 'OFFLINE'
+                            }" x-text="cam.status"></span>
+                        </div>
+                        <div class="mt-3 grid grid-cols-2 gap-y-1 text-xs text-gray-600">
+                            <div>Source</div>
+                            <div class="text-right font-medium" x-text="cam.source_type || '-'"></div>
+                            <div>Processed FPS</div>
+                            <div class="text-right font-medium" x-text="formatMetric(cam.processed_fps, 2)"></div>
+                            <div>Inference (ms)</div>
+                            <div class="text-right font-medium" x-text="formatMetric(cam.inference_time_ms, 1)"></div>
+                            <div>Queue Lag (ms)</div>
+                            <div class="text-right font-medium" x-text="formatMetric(cam.queue_lag_ms, 1)"></div>
+                            <div>Last Result Age</div>
+                            <div class="text-right font-medium" x-text="formatAge(cam.last_result_age_sec)"></div>
+                            <div>Events</div>
+                            <div class="text-right font-medium" x-text="cam.events_count ?? 0"></div>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="cameraHealth.length === 0"
+                     class="col-span-full bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-8 text-center text-gray-500">
+                    Health metrics belum tersedia.
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-            <!-- SPG Status Grid (Left, wider) -->
             <div class="lg:col-span-2 space-y-6">
-                <h2 class="text-lg font-bold text-gray-900">👥 Personnel Status</h2>
-
+                <h2 class="text-lg font-bold text-gray-900">Personnel Status</h2>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <template x-for="spg in sortedSpgs" :key="spg.id">
                         <div class="bg-white rounded-xl shadow-sm overflow-hidden border transition-all duration-300 hover:shadow-md"
-                            :class="{
-                                'border-green-500 ring-1 ring-green-500': spg.status === 'PRESENT',
-                                'border-red-500 ring-1 ring-red-500': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
-                                'border-gray-200': spg.status === 'NOT_SEEN_YET'
+                             :class="{
+                                 'border-green-500 ring-1 ring-green-500': spg.status === 'PRESENT',
+                                 'border-red-500 ring-1 ring-red-500': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
+                                 'border-gray-200': spg.status === 'NOT_SEEN_YET'
                              }">
-
-                            <!-- Header Status Bar -->
                             <div class="px-4 py-2 text-xs font-bold uppercase tracking-wide flex justify-between items-center"
-                                :class="{
-                                    'bg-green-50 text-green-700': spg.status === 'PRESENT',
-                                    'bg-red-50 text-red-700': spg.status === 'ABSENT' || spg.status === 'NEVER_ARRIVED',
-                                    'bg-gray-50 text-gray-600': spg.status === 'NOT_SEEN_YET'
+                                 :class="{
+                                     'bg-green-50 text-green-700': spg.status === 'PRESENT',
+                                     'bg-red-50 text-red-700': spg.status === 'ABSENT',
+                                     'bg-orange-50 text-orange-700': spg.status === 'NEVER_ARRIVED',
+                                     'bg-gray-50 text-gray-600': spg.status === 'NOT_SEEN_YET'
                                  }">
                                 <span x-text="spg.status.replace('_', ' ')"></span>
                                 <span x-text="formatDuration(spg.seconds_since_last_event)"></span>
                             </div>
-
                             <div class="p-4 flex items-start space-x-4">
-                                <!-- Photo -->
-                                <div
-                                    class="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 flex-shrink-0 border-2 border-white shadow-sm">
+                                <div class="relative w-16 h-16 rounded-full overflow-hidden bg-gray-200 flex-shrink-0 border-2 border-white shadow-sm">
                                     <template x-if="spg.snapshot_url">
                                         <img :src="spg.snapshot_url" class="w-full h-full object-cover">
                                     </template>
                                     <template x-if="!spg.snapshot_url">
-                                        <div
-                                            class="w-full h-full flex items-center justify-center text-gray-400 text-xl">
-                                            👤</div>
+                                        <div class="w-full h-full flex items-center justify-center text-gray-400 text-xl">U</div>
                                     </template>
                                 </div>
-
-                                <!-- Info -->
                                 <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-medium text-gray-900 truncate"
-                                        x-text="spg.name || 'Unknown'"></p>
+                                    <p class="text-sm font-medium text-gray-900 truncate" x-text="spg.name || 'Unknown'"></p>
                                     <p class="text-xs text-gray-500 truncate" x-text="'ID: ' + spg.id"></p>
-
                                     <div class="mt-2 flex items-center text-xs text-gray-500">
-                                        <span class="mr-1">🕒 Last seen:</span>
-                                        <span
-                                            x-text="spg.last_seen_ts ? new Date(spg.last_seen_ts * 1000).toLocaleTimeString() : '-'"></span>
+                                        <span class="mr-1">Last seen:</span>
+                                        <span x-text="formatRelativeTime(spg.last_seen_ts)"></span>
                                     </div>
                                 </div>
                             </div>
@@ -166,22 +168,20 @@
                 </div>
             </div>
 
-            <!-- Recent Events Sidebar (Right) -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-[600px]">
                 <div class="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl">
-                    <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">📋 Recent Events</h3>
+                    <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Recent Events</h3>
                 </div>
                 <div class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                     <template x-for="ev in events" :key="ev.ts + ev.spg_id">
                         <div class="p-3 rounded-lg text-sm border-l-4" :class="{
-                                'bg-green-50 border-green-400': ev.event_type.includes('PRESENT') || ev.event_type.includes('SEEN'),
-                                'bg-red-50 border-red-400': ev.event_type.includes('ABSENT'),
-                                'bg-gray-50 border-gray-300': !ev.event_type.includes('PRESENT') && !ev.event_type.includes('ABSENT')
-                             }">
+                            'bg-green-50 border-green-400': ev.event_type.includes('PRESENT') || ev.event_type.includes('SEEN'),
+                            'bg-red-50 border-red-400': ev.event_type.includes('ABSENT'),
+                            'bg-gray-50 border-gray-300': !ev.event_type.includes('PRESENT') && !ev.event_type.includes('ABSENT')
+                        }">
                             <div class="flex justify-between items-start">
                                 <span class="font-bold text-gray-800" x-text="ev.name || ev.spg_id"></span>
-                                <span class="text-xs text-gray-400"
-                                    x-text="new Date(ev.ts * 1000).toLocaleTimeString()"></span>
+                                <span class="text-xs text-gray-400" x-text="new Date(ev.ts * 1000).toLocaleTimeString()"></span>
                             </div>
                             <div class="text-xs text-gray-600 mt-1" x-text="ev.event_type.replace(/_/g, ' ')"></div>
                             <div class="text-xs text-gray-400 mt-0.5 flex justify-between">
@@ -194,9 +194,28 @@
                     </div>
                 </div>
             </div>
-
         </div>
     </main>
+
+    <div x-show="cameraModal.open" x-cloak class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
+         @click.self="closeCameraModal()" @keydown.escape.window="closeCameraModal()"
+         x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+        <div class="relative w-full max-w-6xl mx-4">
+            <div class="flex justify-between items-center mb-3">
+                <div class="flex items-center space-x-3">
+                    <span class="text-white text-lg font-bold font-mono" x-text="cameraModal.cam?.id"></span>
+                    <span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium">LIVE</span>
+                </div>
+                <button @click="closeCameraModal()" class="text-white/70 hover:text-white transition-colors text-2xl leading-none">&times;</button>
+            </div>
+            <div class="bg-black rounded-lg overflow-hidden shadow-2xl">
+                <div class="px-3 py-2 bg-gray-900 text-gray-100 text-xs font-semibold">AI View (overlay)</div>
+                <img x-show="cameraModal.open" :src="cameraModal.cam?.ai_url" class="w-full h-auto" alt="AI Camera Feed">
+            </div>
+        </div>
+    </div>
 
     <script>
         function dashboard() {
@@ -204,30 +223,31 @@
                 state: { spgs: [] },
                 events: [],
                 cameras: [],
+                cameraHealth: [],
                 systemStatus: 'OFFLINE',
                 lastUpdate: '-',
                 showCameras: false,
+                cameraModal: { open: false, cam: null },
 
                 init() {
                     this.fetchData();
                     this.fetchCameras();
-                    setInterval(() => this.fetchData(), 2000); // Poll every 2s
+                    setInterval(() => this.fetchData(), 2000);
                 },
 
                 async fetchData() {
                     try {
-                        // Fetch State
                         const resState = await fetch('/api/state');
                         const dataState = await resState.json();
                         this.state = dataState;
                         this.systemStatus = dataState.system_status || 'OFFLINE';
+                        this.cameraHealth = dataState.camera_health || [];
                         this.lastUpdate = new Date().toLocaleTimeString();
 
-                        // Fetch Events
                         const resEvents = await fetch('/api/events');
                         this.events = await resEvents.json();
                     } catch (e) {
-                        console.error("Fetch error", e);
+                        console.error('Fetch error', e);
                         this.systemStatus = 'ERROR';
                     }
                 },
@@ -238,13 +258,13 @@
                         const cams = await res.json();
                         this.cameras = cams.map(c => ({
                             id: c.id,
-                            url: c.stream_url
+                            ai_url: c.ai_stream_url || c.stream_url
                         }));
                         if (this.cameras.length > 0) {
                             this.showCameras = true;
                         }
                     } catch (e) {
-                        console.error("Camera fetch error", e);
+                        console.error('Camera fetch error', e);
                     }
                 },
 
@@ -252,13 +272,20 @@
                     this.showCameras = !this.showCameras;
                 },
 
+                openCameraModal(cam) {
+                    this.cameraModal = { open: true, cam: cam };
+                },
+
+                closeCameraModal() {
+                    this.cameraModal = { open: false, cam: null };
+                },
+
                 get sortedSpgs() {
                     if (!this.state.spgs) return [];
-                    // Priority: ABSENT/NEVER_ARRIVED > PRESENT > NOT_SEEN
                     const priority = {
-                        "ABSENT": 0, "NEVER_ARRIVED": 0,
-                        "PRESENT": 1,
-                        "NOT_SEEN_YET": 2
+                        ABSENT: 0, NEVER_ARRIVED: 0,
+                        PRESENT: 1,
+                        NOT_SEEN_YET: 2
                     };
                     return [...this.state.spgs].sort((a, b) => {
                         const pa = priority[a.status] ?? 99;
@@ -281,10 +308,31 @@
                     if (seconds < 60) return `${seconds}s`;
                     if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
                     return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+                },
+
+                formatMetric(value, digits = 1) {
+                    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+                    return Number(value).toFixed(digits);
+                },
+
+                formatAge(value) {
+                    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+                    return `${Number(value).toFixed(1)}s`;
+                },
+                
+                formatRelativeTime(ts) {
+                    if (!ts) return '-';
+                    const now = Date.now() / 1000;
+                    const diff = now - ts;
+                    
+                    if (diff < 10) return 'Just now';
+                    if (diff < 60) return `${Math.floor(diff)}s ago`;
+                    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+                    return new Date(ts * 1000).toLocaleTimeString();
                 }
-            }
+            };
         }
     </script>
 </body>
-
 </html>

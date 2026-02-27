@@ -1,119 +1,132 @@
-# System Flow & Pipeline
+# System Flow and Runtime Architecture
 
-Dokumen ini menjelaskan alur data (data flow) utama dalam sistem Face Recognition.
+Dokumen ini menjelaskan alur runtime aktual pada mode multi-camera centralized.
 
----
+## 1. Operation Modes
 
-## 1. Enrollment Pipeline (Pendaftaran SPG)
+### Single camera
 
-Proses mendaftarkan wajah baru ke dalam sistem.
+- Command: `python -m src.app run`
+- Flow: capture -> inference -> presence -> alert dalam satu proses.
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Frontend as 🌐 Dashboard (Alpine.js)
-    participant Backend as ⚡ FastAPI (main.py)
-    participant Detector as 🧠 FaceDetector
-    participant Store as 📁 GalleryStore
+### Multi-camera centralized
 
-    User->>Frontend: Upload Foto / Capture Webcam
-    Frontend->>Backend: POST /api/gallery/enroll (Multipart)
-    
-    activate Backend
-    Backend->>Detector: detect(image)
-    Detector-->>Backend: face_embedding, face_crop
-    
-    Backend->>Store: save_person(spg_id, embeddings)
-    Backend->>Store: save_face_crop(spg_id, image)
-    Backend-->>Frontend: Success (200 OK)
-    deactivate Backend
-    
-    Frontend-->>User: Show Success & Update Table
-```
+- Command:
+  - `python -m src.commands.run_outlet --config <yaml>`
+  - atau quick switch `make run-demo|run-staging|run-prod`
+- Flow:
+  - N camera workers
+  - 1 inference server
+  - 1 main process (router + aggregator + supervisor)
 
-**Keterangan:**
-1.  **Input**: Gambar (JPG/PNG) dari upload atau webcam.
-2.  **Processing**: `FaceDetector` (InsightFace) mendeteksi wajah & mengekstrak vektor (512-d).
-3.  **Storage**: Vektor disimpan sebagai JSON, crop wajah disimpan sebagai JPG untuk UI.
+## 2. Main Pipeline
 
----
+1. Worker membaca frame dari RTSP/webcam/file.
+2. Worker throttle berdasarkan `camera.process_fps`.
+3. Worker kirim metadata/frame ke inference:
+   - shared memory mode (utama)
+   - queue fallback mode
+4. Inference server:
+   - baca item queue
+   - apply `frame_skip` (dinamis)
+   - detect + match
+   - kirim hasil ke output queue
+5. Main process:
+   - route feedback ke worker
+   - generate event `SPG_SEEN`
+   - ingest ke `OutletAggregator`
+   - tick absence logic + alert
+   - dump state dan health JSON
 
-## 2. Recognition Loop (Single Camera)
+## 3. Self-Healing Supervisor
 
-Proses deteksi dan pengenalan wajah realtime pada setiap kamera.
+Main loop memonitor process:
 
-```mermaid
-flowchart TD
-    Cam[📹 Camera Source] --> |Frame (BGR)| Detect[🧠 FaceDetector]
-    Detect --> |Face Embedding| Match[🔍 Matcher]
-    
-    subgraph "Vectorized Matching"
-        Match --> |Compare vs Gallery| Matrix[🔢 Dot Product (NumPy)]
-        Matrix --> |Score > Threshold| Result{IS MATCH?}
-    end
-    
-    Result -- Yes --> SPG[🟢 SPG_SEEN Event]
-    Result -- No --> Unknown[Unknown (Ignored)]
-    
-    SPG --> Log[📄 Event Log (events.jsonl)]
-    SPG --> Presence[⏱️ Presence Engine]
-```
+- inference process
+- worker per kamera
 
-**Key Components:**
--   **Configurable Model**: `buffalo_l` (ResNet) atau `buffalo_s` (MobileNet) via `app.dev.yaml`.
--   **Vectorized Matcher**: Menggunakan operasi matriks NumPy untuk membandingkan 1 wajah vs N gallery sekaligus (sangat cepat).
+Jika mati:
 
----
+- restart dengan cooldown `runtime.supervisor_restart_cooldown_sec`
+- restart dibatasi `runtime.supervisor_max_restarts_per_minute`
+- jika budget habis, worker/inference ditandai exhausted
 
-## 3. Presence & Alert Logic (Aggregator)
+## 4. Adaptive Degrade
 
-Bagaimana sistem menentukan SPG hadir (Present) atau hilang (Absent).
+Saat load tinggi (lag naik), main loop otomatis naikkan `frame_skip`.
+Saat stabil kembali, `frame_skip` diturunkan.
 
-```mermaid
-stateDiagram-v2
-    [*] --> UNKNOWN
-    
-    UNKNOWN --> PRESENT : First Hit (SPG_SEEN)
-    
-    state PRESENT {
-        [*] --> Active
-        Active --> GracePeriod : No Hit > 1s
-        GracePeriod --> Active : Hit detected
-    }
-    
-    PRESENT --> ABSENT : No Hit > 5 mins (absent_seconds)
-    
-    ABSENT --> Alerting : Trigger Alert
-    Alerting --> ABSENT : Alert Sent (One-time)
-    
-    ABSENT --> PRESENT : Hit detected (Re-entry)
-```
+Kontrol:
 
-**Rules:**
-1.  **Hit**: Satu frame terdeteksi valid.
-2.  **Grace Period**: Toleransi kedipan mata / occlusion sebentar.
-3.  **Absent**: Jika tidak ada *Hit* selama durasi `absent_seconds` (default 300s).
-4.  **Alert**: Telegram message dikirim **hanya 1x** saat transisi ke ABSENT. Alert reset jika SPG kembali PRESENT.
+- `runtime.auto_degrade_enabled`
+- `runtime.auto_degrade_lag_high_ms`
+- `runtime.auto_degrade_lag_low_ms`
+- `runtime.auto_degrade_high_streak`
+- `runtime.auto_degrade_low_streak`
+- `runtime.auto_degrade_max_frame_skip`
 
----
+## 5. RTSP Failure Handling
 
-## 4. Multi-Camera Aggregation (Outlet Level)
+`RTSPReader` memakai:
 
-Jika outlet memiliki banyak kamera, status kehadiran digabungkan.
+- reconnect exponential backoff
+- jitter
+- retry schedule non-blocking
 
-```mermaid
-flowchart LR
-    Cam1[Worker Cam 01] --> |Event| EventLog1[📄 events.jsonl]
-    Cam2[Worker Cam 02] --> |Event| EventLog2[📄 events.jsonl]
-    
-    EventLog1 --> Aggregator[🔄 Outlet Aggregator]
-    EventLog2 --> Aggregator
-    
-    Aggregator --> GlobalState{Global Presence?}
-    
-    GlobalState -- "Lost in ALL cams" --> Telegram[📱 Telegram Alert]
-```
+Tujuan: mencegah reconnect storm saat jaringan tidak normal.
 
-**Konsep**: **ANY-of-N**.
-SPG dianggap **PRESENT** jika terlihat di mana pun (Kamera 1 ATAU Kamera 2).
-SPG dianggap **ABSENT** hanya jika hilang dari **SEMUA** kamera secara bersamaan.
+## 6. Dashboard Data Flow
+
+Pipeline menghasilkan:
+
+- `outlet_state.json`
+- `camera_health.json`
+- `cam_x/events.jsonl`
+- `cam_x/snapshots/latest_frame.jpg`
+
+Dashboard FastAPI membaca data ini lewat:
+
+- `GET /api/state`
+- `GET /api/events`
+- `GET /api/health`
+- `GET /stream/{cam_id}`
+
+## 7. Stream Stability Notes
+
+- Worker menulis preview JPEG secara atomic.
+- Stream endpoint validasi basic JPEG boundary.
+- Jika frame baru tidak valid, endpoint pakai last-good-frame.
+
+## 8. Health Metrics
+
+Per kamera:
+
+- `status` (`LIVE`, `STALE`, `OFFLINE`)
+- `processed_fps`
+- `inference_time_ms`
+- `queue_lag_ms`
+- `last_result_age_sec`
+- `worker_alive`
+- `worker_restarts_last_minute`
+- `restart_exhausted`
+
+Global:
+
+- `frame_skip`
+- `base_frame_skip`
+- status supervisor inference
+
+## 9. Recommended Runtime Profiles
+
+### Demo
+
+- smooth UI
+- `process_fps` lebih tinggi
+- base `frame_skip` rendah
+
+### Production
+
+- hemat resource
+- base `frame_skip` moderat
+- auto-degrade aktif untuk spike handling
+- preview width/quality lebih kecil

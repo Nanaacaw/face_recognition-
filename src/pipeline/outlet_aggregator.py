@@ -45,11 +45,11 @@ class OutletAggregator:
         if ts > self.last_seen[spg_id]:
             self.last_seen[spg_id] = ts
             
-        # If they were absent, they are now PRESENT
-        if self.is_absent[spg_id]:
-            self.is_absent[spg_id] = False
-            self.alert_fired[spg_id] = False
-            # We could emit a SPG_GLOBAL_PRESENT event here if needed
+            # Only reset absence if this is new information
+            if self.is_absent[spg_id]:
+                self.is_absent[spg_id] = False
+                self.alert_fired[spg_id] = False
+                # We could emit a SPG_GLOBAL_PRESENT event here if needed
 
     def tick(self) -> List[Event]:
         """
@@ -78,8 +78,9 @@ class OutletAggregator:
                             outlet_id=self.outlet_id,
                             camera_id="aggregator",
                             spg_id=spg_id,
+                            name=self.spg_names.get(spg_id),
                             details={
-                                "reason": "startup_absence_never_arrived",
+                                "reason": "SPG tidak terlihat dari awal (never_seen)",
                                 "seconds_since_startup": int(now - self.start_time)
                             }
                         )
@@ -103,7 +104,7 @@ class OutletAggregator:
                         spg_id=spg_id,
                         name=self.spg_names.get(spg_id),
                         details={
-                            "reason": "global_absence",
+                            "reason": "SPG tidak terlihat di area.",
                             "seconds_since_last_seen": int(time_diff)
                         }
                     )

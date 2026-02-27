@@ -2,24 +2,38 @@ import json
 import os
 import glob
 import time
-from datetime import datetime
+from collections import deque
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel
 from src.pipeline.face_detector import FaceDetector
 from src.settings.settings import load_settings
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SIM_OUTPUT_DIR = os.path.join(BASE_DIR, "data", "sim_output")
+SETTINGS = load_settings()
+DATA_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.sim_output_subdir)
+GALLERY_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.gallery_subdir)
+HEALTH_PATH = os.path.join(DATA_DIR, "camera_health.json")
 
-if not os.path.exists(SIM_OUTPUT_DIR):
-    print(f"Warning: {SIM_OUTPUT_DIR} does not exist yet. Dashboard might be empty.")
-    os.makedirs(SIM_OUTPUT_DIR, exist_ok=True)
+if not os.path.exists(DATA_DIR):
+    print(f"Warning: {DATA_DIR} does not exist yet. Dashboard might be empty.")
+    os.makedirs(DATA_DIR, exist_ok=True)
 
-DATA_DIR = SIM_OUTPUT_DIR
+
+def _get_configured_camera_ids() -> set[str]:
+    """Return a set of camera IDs present in the current configuration."""
+    ids = set()
+    if SETTINGS.outlet and SETTINGS.outlet.cameras:
+        for cam in SETTINGS.outlet.cameras:
+            if cam.id:
+                ids.add(cam.id)
+    
+    if SETTINGS.target and SETTINGS.target.camera_id:
+        ids.add(SETTINGS.target.camera_id)
+        
+    return ids
+
 
 app = FastAPI(title="SPG Dashboard", version="2.0")
 
@@ -39,34 +53,63 @@ def get_state():
     path = os.path.join(DATA_DIR, "outlet_state.json")
     if not os.path.exists(path):
         return {"status": "waiting", "outlet_id": "Unknown", "spgs": []}
-    
+
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
-def get_recent_events(limit=50):
+
+def get_health():
+    if not os.path.exists(HEALTH_PATH):
+        return {"timestamp": 0, "outlet_id": "Unknown", "cameras": []}
+
+    try:
+        with open(HEALTH_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {"timestamp": 0, "outlet_id": "Unknown", "cameras": []}
+
+    if not isinstance(payload, dict):
+        return {"timestamp": 0, "outlet_id": "Unknown", "cameras": []}
+    payload.setdefault("cameras", [])
+    payload.setdefault("timestamp", 0)
+    payload.setdefault("outlet_id", "Unknown")
+    return payload
+
+
+def get_recent_events(limit: int | None = None):
+    limit = limit or SETTINGS.dashboard.recent_events_limit
     events = []
     pattern = os.path.join(DATA_DIR, "cam_*", "events.jsonl")
     files = glob.glob(pattern)
-    
+
+    active_ids = _get_configured_camera_ids()
+    valid_files = []
     for ef in files:
         cam_id = os.path.basename(os.path.dirname(ef))
-        try:
-            with open(ef, "r") as f:
-                lines = f.readlines()
-                for line in lines[-limit:]:
-                    if line.strip():
-                        try:
-                            ev = json.loads(line)
-                            ev["_camera"] = cam_id
-                            events.append(ev)
-                        except:
-                            pass
-        except:
-            pass
+        if cam_id in active_ids:
+            valid_files.append(ef)
             
+    for ef in valid_files:
+        cam_id = os.path.basename(os.path.dirname(ef))
+        try:
+            with open(ef, "r", encoding="utf-8") as f:
+                recent_lines = deque(f, maxlen=limit)
+
+            for line in recent_lines:
+                if not line.strip():
+                    continue
+                try:
+                    ev = json.loads(line)
+                    ev["_camera"] = cam_id
+                    events.append(ev)
+                except json.JSONDecodeError:
+                    continue
+        except Exception:
+            pass
+
     events.sort(key=lambda x: x.get("ts", 0), reverse=True)
     return events[:limit]
 
@@ -90,6 +133,7 @@ async def index(request: Request):
 @app.get("/api/state")
 async def api_state():
     state = get_state()
+    health = get_health()
     if "spgs" in state:
         for spg in state["spgs"]:
             spg_id = spg.get("id")
@@ -100,14 +144,21 @@ async def api_state():
                 spg["snapshot_url"] = None
     
     last_ts = state.get("timestamp", 0)
-    is_live = (time.time() - last_ts) < 10
+    is_live = (time.time() - last_ts) < SETTINGS.dashboard.live_window_seconds
     state["system_status"] = "LIVE" if is_live else "OFFLINE"
+    state["camera_health"] = health.get("cameras", [])
+    state["camera_health_timestamp"] = health.get("timestamp", 0)
     
     return state
 
 @app.get("/api/events")
 async def api_events():
     return get_recent_events()
+
+
+@app.get("/api/health")
+async def api_health():
+    return get_health()
 
 @app.get("/api/snapshot/{spg_id}")
 async def api_snapshot(spg_id: str):
@@ -119,59 +170,88 @@ async def api_snapshot(spg_id: str):
 @app.get("/api/cameras")
 async def api_cameras():
     cams = []
+    active_ids = _get_configured_camera_ids()
+    
     pattern = os.path.join(DATA_DIR, "cam_*")
     dirs = glob.glob(pattern)
     for d in dirs:
         if os.path.isdir(d):
             cam_id = os.path.basename(d)
+            if cam_id not in active_ids:
+                continue
+            
             cams.append({
                 "id": cam_id,
-                "stream_url": f"/stream/{cam_id}"
+                "stream_url": f"/stream/{cam_id}",
+                "ai_stream_url": f"/stream/{cam_id}",
+                "raw_stream_url": f"/stream_raw/{cam_id}",
             })
     return cams
 
 
-def mjpeg_generator(cam_id):
-    """Yields MJPEG stream from latest_frame.jpg"""
-    file_path = os.path.join(DATA_DIR, cam_id, "snapshots", "latest_frame.jpg")
-    
-    while True:
+async def mjpeg_generator(cam_id: str, request: Request, filename: str):
+    """Yields MJPEG stream from a snapshot file. Stops when client disconnects."""
+    import asyncio
+    file_path = os.path.join(DATA_DIR, cam_id, "snapshots", filename)
+    last_good_frame: bytes | None = None
+
+    while not await request.is_disconnected():
+        frame_data = None
         if os.path.exists(file_path):
             try:
                 with open(file_path, "rb") as f:
-                    frame_data = f.read()
-                
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
-                
-                time.sleep(0.2)
+                    candidate = f.read()
+                if candidate.startswith(b"\xff\xd8") and candidate.endswith(b"\xff\xd9"):
+                    frame_data = candidate
+                    last_good_frame = candidate
             except Exception:
-                time.sleep(0.5)
+                frame_data = None
+
+        if frame_data is None:
+            frame_data = last_good_frame
+
+        if frame_data is not None:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
+            await asyncio.sleep(SETTINGS.dashboard.stream_frame_interval_sec)
         else:
-            time.sleep(1.0)
+            await asyncio.sleep(SETTINGS.dashboard.stream_missing_frame_sleep_sec)
 
 @app.get("/stream/{cam_id}")
-async def stream_feed(cam_id: str):
+async def stream_feed(cam_id: str, request: Request):
     return StreamingResponse(
-        mjpeg_generator(cam_id),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        mjpeg_generator(cam_id, request, "latest_frame.jpg"),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
-# Gallery Management
+@app.get("/stream_raw/{cam_id}")
+async def stream_raw_feed(cam_id: str, request: Request):
+    return StreamingResponse(
+        mjpeg_generator(cam_id, request, "latest_raw_frame.jpg"),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
-GALLERY_DIR = os.path.join(BASE_DIR, "data", "gallery")
 
 _detector_instance: "FaceDetector | None" = None
 
 def _get_detector():
     global _detector_instance
     if _detector_instance is None:
-        cfg = load_settings()
         _detector_instance = FaceDetector(
-            name=cfg.recognition.model_name,
-            providers=cfg.recognition.execution_providers,
-            det_size=tuple(cfg.recognition.det_size)
+            name=SETTINGS.recognition.model_name,
+            providers=SETTINGS.recognition.execution_providers,
+            det_size=SETTINGS.recognition.det_size,
         )
         _detector_instance.start()
     return _detector_instance
@@ -186,7 +266,7 @@ async def manage_page(request: Request):
 async def api_gallery_list():
     """List all enrolled SPGs."""
     from src.storage.gallery_store import GalleryStore
-    store = GalleryStore(os.path.join(BASE_DIR, "data"))
+    store = GalleryStore(SETTINGS.storage.data_dir)
     gallery = store.load_all()
 
     result = []
@@ -258,7 +338,7 @@ async def api_gallery_enroll(request: Request):
             detector=detector,
         )
 
-        store = GalleryStore(os.path.join(BASE_DIR, "data"))
+        store = GalleryStore(SETTINGS.storage.data_dir)
         store.save_person(spg_id, payload)
 
         if face_crop is not None:
@@ -297,4 +377,9 @@ async def api_gallery_delete(spg_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("src.frontend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "src.frontend.main:app",
+        host=SETTINGS.dashboard.host,
+        port=SETTINGS.dashboard.port,
+        reload=SETTINGS.dashboard.reload,
+    )

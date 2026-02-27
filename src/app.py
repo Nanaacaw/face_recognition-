@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import argparse
+import re
 import cv2
 
 from src.settings.settings import load_settings
 from src.pipeline.webcam_reader import WebcamReader
 from src.pipeline.face_detector import FaceDetector
+
+_UNRESOLVED_ENV_PATTERN = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}|%[A-Za-z_][A-Za-z0-9_]*%")
+
+
+def _resolve_webcam_index(webcam_index: int | None) -> int:
+    return 0 if webcam_index is None else webcam_index
+
+
+def _has_unresolved_env_placeholder(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(_UNRESOLVED_ENV_PATTERN.search(str(value)))
 
 
 def cmd_debug(config_path: str | None):
@@ -29,13 +42,13 @@ def cmd_debug(config_path: str | None):
         return
 
     reader = WebcamReader(
-        cfg.camera.webcam_index or 0,
+        _resolve_webcam_index(cfg.camera.webcam_index),
         cfg.camera.process_fps,
     )
     detector = FaceDetector(
-        name=getattr(cfg.recognition, "model_name", "buffalo_s"),
-        providers=getattr(cfg.recognition, "execution_providers", None),
-        det_size=tuple(getattr(cfg.recognition, "det_size", (640, 640)))
+        name=cfg.recognition.model_name,
+        providers=cfg.recognition.execution_providers,
+        det_size=cfg.recognition.det_size,
     )
 
     reader.start()
@@ -103,11 +116,13 @@ def main():
 
     if args.command == "run":
         cfg = load_settings(args.config)
+        if cfg.camera.source == "rtsp" and _has_unresolved_env_placeholder(cfg.camera.rtsp_url):
+            raise ValueError("camera.rtsp_url still contains env placeholder. Set RTSP URL in .env.")
         from src.commands.run_webcam import run_webcam_recognition
 
         run_webcam_recognition(
             data_dir=cfg.storage.data_dir,
-            webcam_index=cfg.camera.webcam_index or 0,
+            webcam_index=_resolve_webcam_index(cfg.camera.webcam_index),
             process_fps=cfg.camera.process_fps,
             threshold=cfg.recognition.threshold,
             grace_seconds=cfg.presence.grace_seconds,
@@ -118,9 +133,19 @@ def main():
             camera_source=cfg.camera.source,
             rtsp_url=cfg.camera.rtsp_url,
             preview=cfg.camera.preview,
-            model_name=getattr(cfg.recognition, "model_name", "buffalo_s"),
-            execution_providers=getattr(cfg.recognition, "execution_providers", None),
-            det_size=getattr(cfg.recognition, "det_size", (640, 640)),
+            model_name=cfg.recognition.model_name,
+            execution_providers=cfg.recognition.execution_providers,
+            det_size=cfg.recognition.det_size,
+            enable_notifier=cfg.notification.telegram_enabled,
+            notifier_token_env=cfg.notification.telegram_bot_token_env,
+            notifier_chat_id_env=cfg.notification.telegram_chat_id_env,
+            notifier_timeout_sec=cfg.notification.timeout_sec,
+            notifier_max_retries=cfg.notification.max_retries,
+            notifier_retry_backoff_base_sec=cfg.notification.retry_backoff_base_sec,
+            notifier_retry_after_default_sec=cfg.notification.retry_after_default_sec,
+            preview_frame_save_interval_sec=cfg.runtime.preview_frame_save_interval_sec,
+            preview_frame_width=cfg.runtime.preview_frame_width,
+            preview_jpeg_quality=cfg.runtime.preview_jpeg_quality,
         )
         return
 
@@ -137,12 +162,12 @@ def main():
             spg_id=args.spg_id,
             name=args.name,
             data_dir=cfg.storage.data_dir,
-            webcam_index=cfg.camera.webcam_index or 0,
+            webcam_index=_resolve_webcam_index(cfg.camera.webcam_index),
             process_fps=cfg.camera.process_fps,
             samples=args.samples,
-            model_name=getattr(cfg.recognition, "model_name", "buffalo_s"),
-            execution_providers=getattr(cfg.recognition, "execution_providers", None),
-            det_size=tuple(getattr(cfg.recognition, "det_size", (640, 640))),
+            model_name=cfg.recognition.model_name,
+            execution_providers=cfg.recognition.execution_providers,
+            det_size=cfg.recognition.det_size,
         )
         return
 

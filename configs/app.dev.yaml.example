@@ -3,7 +3,7 @@ camera:
   source: webcam
   webcam_index: 0
   rtsp_url: null
-  process_fps: 8
+  process_fps: 5
   preview: true
 
 target:
@@ -13,9 +13,9 @@ target:
 
 ## Shared Settings
 recognition:
-  threshold: 0.3
+  threshold: 0.40
   min_consecutive_hits: 2
-  model_name: "buffalo_s"
+  model_name: "buffalo_l"
   execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
   det_size: [640, 640]
 
@@ -47,8 +47,8 @@ outlet:
 
 ## Inference Server (Centralized Mode)
 inference:
-  frame_skip: 0
-  max_frame_height: 720
+  frame_skip: 0          # Skip N frames between inferences (0 = every frame, 2 = process 1 in 3)
+  max_frame_height: 720  # Shared memory buffer size
   max_frame_width: 1280
 
 ## Notification
@@ -72,17 +72,17 @@ runtime:
   worker_idle_sleep_sec: 0.05
   main_loop_sleep_sec: 0.05
   supervisor_restart_cooldown_sec: 3.0
-  supervisor_max_restarts_per_minute: 15
+  supervisor_max_restarts_per_minute: 12
   auto_degrade_enabled: true
-  auto_degrade_lag_high_ms: 350
-  auto_degrade_lag_low_ms: 140
-  auto_degrade_high_streak: 12
-  auto_degrade_low_streak: 30
+  auto_degrade_lag_high_ms: 400
+  auto_degrade_lag_low_ms: 170
+  auto_degrade_high_streak: 15
+  auto_degrade_low_streak: 35
   auto_degrade_max_frame_skip: 2
   preview_raw_enabled: false
-  preview_frame_save_interval_sec: 0.1
+  preview_frame_save_interval_sec: 0.2
   preview_frame_width: 640
-  preview_jpeg_quality: 78
+  preview_jpeg_quality: 75
 
 dashboard:
   host: "0.0.0.0"
@@ -90,6 +90,6 @@ dashboard:
   reload: true
   live_window_seconds: 10
   recent_events_limit: 50
-  stream_frame_interval_sec: 0.1
+  stream_frame_interval_sec: 0.15
   stream_error_sleep_sec: 0.5
-  stream_missing_frame_sleep_sec: 0.2
+  stream_missing_frame_sleep_sec: 0.3

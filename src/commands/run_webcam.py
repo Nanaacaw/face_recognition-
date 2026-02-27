@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 import time
 import os
 
@@ -31,6 +30,15 @@ def run_webcam_recognition(
     loop_video: bool = False,
     gallery_dir: str | None = None,
     enable_notifier: bool = True,
+    notifier_token_env: str = "SPG_TELEGRAM_BOT_TOKEN",
+    notifier_chat_id_env: str = "SPG_TELEGRAM_CHAT_ID",
+    notifier_timeout_sec: int = 15,
+    notifier_max_retries: int = 3,
+    notifier_retry_backoff_base_sec: int = 2,
+    notifier_retry_after_default_sec: int = 5,
+    preview_frame_save_interval_sec: float = 0.2,
+    preview_frame_width: int = 640,
+    preview_jpeg_quality: int = 80,
     **kwargs,
 ):
     actual_gallery_dir = gallery_dir if gallery_dir else data_dir
@@ -43,7 +51,14 @@ def run_webcam_recognition(
     notifier = None
     if enable_notifier:
         try:
-            notifier = TelegramNotifier.from_env()
+            notifier = TelegramNotifier.from_env(
+                token_env=notifier_token_env,
+                chat_id_env=notifier_chat_id_env,
+                timeout_sec=notifier_timeout_sec,
+                max_retries=notifier_max_retries,
+                retry_backoff_base_sec=notifier_retry_backoff_base_sec,
+                retry_after_default_sec=notifier_retry_after_default_sec,
+            )
         except Exception as e:
             logger.warning(f"Telegram notifier disabled: {e}")
 
@@ -81,7 +96,7 @@ def run_webcam_recognition(
             event.details["snapshot_path"] = snap_path
 
         event_store.append(event)
-        logger.info(f"[EVENT] {event.model_dump()}")
+        logger.info(f"[EVENT] {event.event_type} - {event.spg_id}")
 
         if notifier is not None and event.event_type == "ABSENT_ALERT_FIRED":
             seconds = event.details.get("seconds_since_last_seen", "?")
@@ -114,7 +129,6 @@ def run_webcam_recognition(
 
     last_snapshot_times = {}
     last_frame_time = 0
-    # Path for latest camera frame (for dashboard preview)
     frame_path = os.path.join(data_dir, "snapshots", "latest_frame.jpg")
 
     try:
@@ -139,8 +153,7 @@ def run_webcam_recognition(
                         continue
 
                     seen_this_frame.add(spg_id)
-                    
-                    # Throttled snapshot saving (max 1x per second)
+
                     last_save = last_snapshot_times.get(spg_id, 0)
                     if now - last_save > 1.0:
                         snapshot_store.save_latest_face(spg_id, frame)
@@ -169,18 +182,17 @@ def run_webcam_recognition(
                         2,
                     )
 
-                # Save latest camera frame for dashboard preview (1x per second)
-                if now - last_frame_time > 1.0:
+                # Save latest camera frame for dashboard preview.
+                if now - last_frame_time > preview_frame_save_interval_sec:
                     try:
                         h, w = frame.shape[:2]
-                        small = cv2.resize(frame, (640, int(h * 640 / w)))
-                        cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                        last_frame_time = now
+                        if w > 0:
+                            small = cv2.resize(frame, (preview_frame_width, int(h * preview_frame_width / w)))
+                            cv2.imwrite(frame_path, small, [cv2.IMWRITE_JPEG_QUALITY, preview_jpeg_quality])
+                            last_frame_time = now
                     except Exception:
                         pass
 
-                # Only run local absence checks if NOT in multi-camera worker mode.
-                # In multi-camera mode, the global OutletAggregator handles absence detection.
                 if enable_notifier:
                     for e in engine.tick(target_spg_ids=target_spg_ids, ts=now):
                         if e.event_type == "ABSENT_ALERT_FIRED":

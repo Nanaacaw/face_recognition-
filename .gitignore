@@ -22,8 +22,10 @@ data/
 .idea/
 .DS_Store
 Thumbs.db
-.agents
+.agents/
 logs
 mkg_*.yaml
 
 sample_video
+configs/app.dev.yaml
+!configs/app.*.yaml.example
