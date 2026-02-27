@@ -44,6 +44,52 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 mb-6">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm font-semibold text-gray-800">Pipeline</span>
+                    <span class="px-2 py-0.5 rounded text-xs font-medium"
+                          :class="pipelineStatus.running ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'"
+                          x-text="pipelineStatus.running ? 'RUNNING' : 'STOPPED'"></span>
+                    <span class="text-xs text-gray-500" x-text="pipelineStatus.pid ? ('PID ' + pipelineStatus.pid) : ''"></span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="startPipeline()"
+                            class="px-3 py-1.5 rounded text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors">
+                        Start
+                    </button>
+                    <button @click="stopPipeline()"
+                            class="px-3 py-1.5 rounded text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors">
+                        Stop
+                    </button>
+                </div>
+            </div>
+            <div class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3">
+                <label class="text-xs text-gray-600">frame_skip
+                    <input type="number" min="0" x-model.number="runtimeControl.frame_skip" class="mt-1 w-full rounded border-gray-300 text-sm">
+                </label>
+                <label class="text-xs text-gray-600">min_hits
+                    <input type="number" min="1" x-model.number="runtimeControl.min_consecutive_hits" class="mt-1 w-full rounded border-gray-300 text-sm">
+                </label>
+                <label class="text-xs text-gray-600">min_det_score
+                    <input type="number" step="0.01" min="0" x-model.number="runtimeControl.min_det_score" class="mt-1 w-full rounded border-gray-300 text-sm">
+                </label>
+                <label class="text-xs text-gray-600">min_face_width_px
+                    <input type="number" min="0" x-model.number="runtimeControl.min_face_width_px" class="mt-1 w-full rounded border-gray-300 text-sm">
+                </label>
+                <label class="text-xs text-gray-600 flex items-end">
+                    <span class="mr-2">auto_degrade</span>
+                    <input type="checkbox" x-model="runtimeControl.auto_degrade_enabled" class="rounded border-gray-300">
+                </label>
+            </div>
+            <div class="mt-3">
+                <button @click="saveRuntimeControl()"
+                        class="px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                    Save Runtime Control
+                </button>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
                 <div class="text-sm font-medium text-gray-500">Total Personnel</div>
@@ -110,6 +156,12 @@
                             <div class="text-right font-medium" x-text="formatMetric(cam.inference_time_ms, 1)"></div>
                             <div>Queue Lag (ms)</div>
                             <div class="text-right font-medium" x-text="formatMetric(cam.queue_lag_ms, 1)"></div>
+                            <div>Capture->Inf (ms)</div>
+                            <div class="text-right font-medium" x-text="formatMetric(cam.capture_to_inference_ms, 1)"></div>
+                            <div>InputQ Wait (ms)</div>
+                            <div class="text-right font-medium" x-text="formatMetric(cam.input_queue_wait_ms, 1)"></div>
+                            <div>Post-InfQ (ms)</div>
+                            <div class="text-right font-medium" x-text="formatMetric(cam.post_inference_queue_ms, 1)"></div>
                             <div>Last Result Age</div>
                             <div class="text-right font-medium" x-text="formatAge(cam.last_result_age_sec)"></div>
                             <div>Events</div>
@@ -172,25 +224,55 @@
                 <div class="p-4 border-b border-gray-100 bg-gray-50 rounded-t-xl">
                     <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Recent Events</h3>
                 </div>
-                <div class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                     <template x-for="ev in events" :key="ev.ts + ev.spg_id">
-                        <div class="p-3 rounded-lg text-sm border-l-4" :class="{
-                            'bg-green-50 border-green-400': ev.event_type.includes('PRESENT') || ev.event_type.includes('SEEN'),
-                            'bg-red-50 border-red-400': ev.event_type.includes('ABSENT'),
-                            'bg-gray-50 border-gray-300': !ev.event_type.includes('PRESENT') && !ev.event_type.includes('ABSENT')
-                        }">
-                            <div class="flex justify-between items-start">
-                                <span class="font-bold text-gray-800" x-text="ev.name || ev.spg_id"></span>
-                                <span class="text-xs text-gray-400" x-text="new Date(ev.ts * 1000).toLocaleTimeString()"></span>
+                        <div class="flex items-start space-x-3 p-3 rounded-lg border border-transparent hover:bg-gray-50 hover:border-gray-200 transition-colors">
+                            <!-- Icon Indicator -->
+                            <div class="flex-shrink-0 mt-0.5">
+                                <template x-if="ev.event_type.includes('PRESENT')">
+                                    <div class="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                        </svg>
+                                    </div>
+                                </template>
+                                <template x-if="ev.event_type.includes('SEEN')">
+                                    <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                            <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd" />
+                                        </svg>
+                                    </div>
+                                </template>
+                                <template x-if="ev.event_type.includes('ABSENT')">
+                                    <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center text-red-600">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 001 1h.01a1 1 0 001-1V6a1 1 0 00-1-1H10z" clip-rule="evenodd" />
+                                        </svg>
+                                    </div>
+                                </template>
                             </div>
-                            <div class="text-xs text-gray-600 mt-1" x-text="ev.event_type.replace(/_/g, ' ')"></div>
-                            <div class="text-xs text-gray-400 mt-0.5 flex justify-between">
-                                <span x-text="ev._camera"></span>
+
+                            <div class="flex-1 min-w-0">
+                                <div class="flex justify-between items-baseline">
+                                    <p class="text-sm font-semibold text-gray-900 truncate" x-text="ev.name || ev.spg_id"></p>
+                                    <span class="text-xs text-gray-400 whitespace-nowrap ml-2" x-text="formatRelativeTime(ev.ts)"></span>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-0.5" x-text="ev.event_type.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())"></p>
+                                <div class="flex items-center mt-1 text-xs text-gray-400">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    <span x-text="ev._camera"></span>
+                                </div>
                             </div>
                         </div>
                     </template>
-                    <div x-show="events.length === 0" class="text-center text-gray-400 py-8 text-sm">
-                        No events yet...
+                    <div x-show="events.length === 0" class="text-center text-gray-400 py-12">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p class="text-sm">No recent events</p>
                     </div>
                 </div>
             </div>
@@ -228,11 +310,22 @@
                 lastUpdate: '-',
                 showCameras: false,
                 cameraModal: { open: false, cam: null },
+                pipelineStatus: { running: false, pid: null, config_path: '' },
+                runtimeControl: {
+                    frame_skip: 0,
+                    min_consecutive_hits: 1,
+                    min_det_score: 0.0,
+                    min_face_width_px: 0,
+                    auto_degrade_enabled: true
+                },
 
                 init() {
                     this.fetchData();
                     this.fetchCameras();
+                    this.fetchPipelineStatus();
+                    this.fetchRuntimeControl();
                     setInterval(() => this.fetchData(), 2000);
+                    setInterval(() => this.fetchPipelineStatus(), 3000);
                 },
 
                 async fetchData() {
@@ -265,6 +358,69 @@
                         }
                     } catch (e) {
                         console.error('Camera fetch error', e);
+                    }
+                },
+
+                async fetchPipelineStatus() {
+                    try {
+                        const res = await fetch('/api/pipeline/status');
+                        this.pipelineStatus = await res.json();
+                    } catch (e) {
+                        console.error('Pipeline status fetch error', e);
+                    }
+                },
+
+                async startPipeline() {
+                    try {
+                        await fetch('/api/pipeline/start', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({})
+                        });
+                        await this.fetchPipelineStatus();
+                    } catch (e) {
+                        console.error('Start pipeline error', e);
+                    }
+                },
+
+                async stopPipeline() {
+                    try {
+                        await fetch('/api/pipeline/stop', { method: 'POST' });
+                        await this.fetchPipelineStatus();
+                    } catch (e) {
+                        console.error('Stop pipeline error', e);
+                    }
+                },
+
+                async fetchRuntimeControl() {
+                    try {
+                        const res = await fetch('/api/runtime/control');
+                        const ctl = await res.json();
+                        this.runtimeControl.frame_skip = Number(ctl.frame_skip ?? 0);
+                        this.runtimeControl.min_consecutive_hits = Number(ctl.min_consecutive_hits ?? 1);
+                        this.runtimeControl.min_det_score = Number(ctl.min_det_score ?? 0);
+                        this.runtimeControl.min_face_width_px = Number(ctl.min_face_width_px ?? 0);
+                        this.runtimeControl.auto_degrade_enabled = Boolean(ctl.auto_degrade_enabled ?? true);
+                    } catch (e) {
+                        console.error('Runtime control fetch error', e);
+                    }
+                },
+
+                async saveRuntimeControl() {
+                    try {
+                        await fetch('/api/runtime/control', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                frame_skip: Number(this.runtimeControl.frame_skip || 0),
+                                min_consecutive_hits: Number(this.runtimeControl.min_consecutive_hits || 1),
+                                min_det_score: Number(this.runtimeControl.min_det_score || 0),
+                                min_face_width_px: Number(this.runtimeControl.min_face_width_px || 0),
+                                auto_degrade_enabled: Boolean(this.runtimeControl.auto_degrade_enabled),
+                            })
+                        });
+                    } catch (e) {
+                        console.error('Runtime control save error', e);
                     }
                 },
 

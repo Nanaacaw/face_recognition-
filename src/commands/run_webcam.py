@@ -19,6 +19,9 @@ def run_webcam_recognition(
     webcam_index: int,
     process_fps: int,
     threshold: float,
+    min_consecutive_hits: int,
+    min_det_score: float,
+    min_face_width_px: int,
     grace_seconds: int,
     absent_seconds: int,
     outlet_id: str,
@@ -64,6 +67,11 @@ def run_webcam_recognition(
 
     matcher = Matcher(threshold=threshold)
     matcher.load_gallery(gallery)
+    target_spg_set = set(target_spg_ids)
+    hit_streaks: dict[str, int] = {}
+    min_hits = max(1, int(min_consecutive_hits))
+    min_score = max(0.0, float(min_det_score))
+    min_width_px = max(0, int(min_face_width_px))
 
     engine = PresenceEngine(
         outlet_id=outlet_id,
@@ -125,7 +133,14 @@ def run_webcam_recognition(
     reader.start()
 
     logger.info("Webcam recognition started. Press 'q' to quit.")
-    logger.info(f"Gallery loaded: {len(gallery)} people  threshold={threshold}")
+    logger.info(
+        "Gallery loaded: %s people  threshold=%.2f min_hits=%s min_det_score=%.2f min_face_width_px=%s",
+        len(gallery),
+        threshold,
+        min_hits,
+        min_score,
+        min_width_px,
+    )
 
     last_snapshot_times = {}
     last_frame_time = 0
@@ -138,21 +153,38 @@ def run_webcam_recognition(
 
             if frame is not None:
                 faces = detector.detect(frame)
-
-                seen_this_frame = set()
-
+                matched_targets_this_frame: dict[str, dict] = {}
                 for f in faces:
+                    score = float(getattr(f, "det_score", 0.0))
+                    x1f, y1f, x2f, y2f = [float(v) for v in f.bbox]
+                    x1, y1, x2, y2 = int(x1f), int(y1f), int(x2f), int(y2f)
+                    face_width_px = max(0.0, x2f - x1f)
+
+                    if score < min_score:
+                        continue
+                    if face_width_px < min_width_px:
+                        continue
+
                     emb = getattr(f, "embedding", None)
                     matched, spg_id, name, sim = matcher.match(emb)
 
                     if not matched:
                         continue
-                    if spg_id not in target_spg_ids:
+                    if spg_id not in target_spg_set:
                         continue
-                    if spg_id in seen_this_frame:
-                        continue
+                    prev = matched_targets_this_frame.get(spg_id)
+                    if prev is None or float(sim) > float(prev["sim"]):
+                        matched_targets_this_frame[spg_id] = {
+                            "name": name,
+                            "sim": float(sim),
+                            "bbox": (x1, y1, x2, y2),
+                        }
 
-                    seen_this_frame.add(spg_id)
+                seen_ids = set(matched_targets_this_frame.keys())
+                for spg_id, payload in matched_targets_this_frame.items():
+                    hit_streaks[spg_id] = hit_streaks.get(spg_id, 0) + 1
+                    if hit_streaks[spg_id] < min_hits:
+                        continue
 
                     last_save = last_snapshot_times.get(spg_id, 0)
                     if now - last_save > 1.0:
@@ -161,17 +193,15 @@ def run_webcam_recognition(
 
                     for e in engine.observe_seen(
                         spg_id=spg_id,
-                        name=name,
-                        similarity=sim,
+                        name=payload["name"],
+                        similarity=payload["sim"],
                         ts=now,
                     ):
                         handle_event(e)
 
-                    # draw bbox
-                    x1, y1, x2, y2 = [int(v) for v in f.bbox]
+                    x1, y1, x2, y2 = payload["bbox"]
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-                    label = f"{name} ({sim:.2f})"
+                    label = f"{payload['name']} ({payload['sim']:.2f})"
                     cv2.putText(
                         frame,
                         label,
@@ -181,6 +211,10 @@ def run_webcam_recognition(
                         (0, 255, 0),
                         2,
                     )
+
+                for spg_id in list(hit_streaks.keys()):
+                    if spg_id not in seen_ids:
+                        hit_streaks.pop(spg_id, None)
 
                 # Save latest camera frame for dashboard preview.
                 if now - last_frame_time > preview_frame_save_interval_sec:

@@ -2,7 +2,13 @@ import json
 import os
 import glob
 import time
+import sys
+import atexit
+import threading
+import subprocess
 from collections import deque
+from pathlib import Path
+
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,6 +21,12 @@ SETTINGS = load_settings()
 DATA_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.sim_output_subdir)
 GALLERY_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.gallery_subdir)
 HEALTH_PATH = os.path.join(DATA_DIR, "camera_health.json")
+RUNTIME_CONTROL_PATH = os.path.join(DATA_DIR, "runtime_control.json")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+_pipeline_lock = threading.Lock()
+_pipeline_process: subprocess.Popen | None = None
+_pipeline_config_path: str | None = None
 
 if not os.path.exists(DATA_DIR):
     print(f"Warning: {DATA_DIR} does not exist yet. Dashboard might be empty.")
@@ -33,6 +45,74 @@ def _get_configured_camera_ids() -> set[str]:
         ids.add(SETTINGS.target.camera_id)
         
     return ids
+
+
+def _resolve_dashboard_config_path() -> str:
+    cfg = os.getenv("APP_CONFIG_PATH", "").strip()
+    if cfg:
+        return cfg
+    env = os.getenv("APP_ENV", "dev").strip() or "dev"
+    return os.path.join("configs", f"app.{env}.yaml")
+
+
+def _as_project_path(path_value: str | None) -> Path:
+    raw = (path_value or _resolve_dashboard_config_path()).strip()
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+def _pipeline_status_payload() -> dict:
+    global _pipeline_process, _pipeline_config_path
+    with _pipeline_lock:
+        proc = _pipeline_process
+        if proc is not None and proc.poll() is not None:
+            # Process has exited; keep exit_code but clear handle.
+            exit_code = int(proc.returncode)
+            _pipeline_process = None
+            return {
+                "running": False,
+                "pid": proc.pid,
+                "exit_code": exit_code,
+                "config_path": _pipeline_config_path or _resolve_dashboard_config_path(),
+            }
+
+        if proc is None:
+            return {
+                "running": False,
+                "pid": None,
+                "exit_code": None,
+                "config_path": _pipeline_config_path or _resolve_dashboard_config_path(),
+            }
+
+        return {
+            "running": True,
+            "pid": proc.pid,
+            "exit_code": None,
+            "config_path": _pipeline_config_path or _resolve_dashboard_config_path(),
+        }
+
+
+def _terminate_pipeline_on_exit() -> None:
+    global _pipeline_process
+    with _pipeline_lock:
+        proc = _pipeline_process
+        if proc is None:
+            return
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        _pipeline_process = None
+
+
+atexit.register(_terminate_pipeline_on_exit)
 
 
 app = FastAPI(title="SPG Dashboard", version="2.0")
@@ -159,6 +239,167 @@ async def api_events():
 @app.get("/api/health")
 async def api_health():
     return get_health()
+
+
+@app.get("/api/pipeline/status")
+async def api_pipeline_status():
+    return _pipeline_status_payload()
+
+
+@app.post("/api/pipeline/start")
+async def api_pipeline_start(request: Request):
+    global _pipeline_process, _pipeline_config_path
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    config_path = str(payload.get("config_path") or _resolve_dashboard_config_path())
+    preview = bool(payload.get("preview", False))
+    config_abs_path = _as_project_path(config_path)
+
+    if not config_abs_path.exists():
+        return {
+            "success": False,
+            "error": f"Config not found: {config_abs_path}",
+            "status": _pipeline_status_payload(),
+        }
+
+    with _pipeline_lock:
+        if _pipeline_process is not None and _pipeline_process.poll() is None:
+            return {
+                "success": True,
+                "message": "Pipeline already running.",
+                "status": _pipeline_status_payload(),
+            }
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "src.commands.run_outlet",
+            "--config",
+            str(config_abs_path),
+        ]
+        if preview:
+            cmd.append("--preview")
+
+        _pipeline_process = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT))
+        _pipeline_config_path = str(config_abs_path)
+
+    return {
+        "success": True,
+        "message": "Pipeline started.",
+        "status": _pipeline_status_payload(),
+    }
+
+
+@app.post("/api/pipeline/stop")
+async def api_pipeline_stop():
+    global _pipeline_process
+    with _pipeline_lock:
+        proc = _pipeline_process
+        if proc is None or proc.poll() is not None:
+            _pipeline_process = None
+            return {
+                "success": True,
+                "message": "Pipeline already stopped.",
+                "status": _pipeline_status_payload(),
+            }
+
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+            proc.wait(timeout=5)
+        _pipeline_process = None
+
+    return {
+        "success": True,
+        "message": "Pipeline stopped.",
+        "status": _pipeline_status_payload(),
+    }
+
+
+@app.get("/api/runtime/control")
+async def api_runtime_control_get():
+    defaults = {
+        "frame_skip": 0,
+        "min_consecutive_hits": 1,
+        "min_det_score": 0.0,
+        "min_face_width_px": 0,
+        "auto_degrade_enabled": True,
+        "control_path": RUNTIME_CONTROL_PATH,
+    }
+    try:
+        if os.path.exists(RUNTIME_CONTROL_PATH):
+            with open(RUNTIME_CONTROL_PATH, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+                if isinstance(payload, dict):
+                    defaults.update(payload)
+    except Exception:
+        pass
+    return defaults
+
+
+@app.post("/api/runtime/control")
+async def api_runtime_control_set(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return {"success": False, "error": "Invalid payload."}
+
+    allowed_keys = {
+        "frame_skip",
+        "min_consecutive_hits",
+        "min_det_score",
+        "min_face_width_px",
+        "auto_degrade_enabled",
+    }
+    sanitized: dict[str, int | float | bool] = {}
+    for key in allowed_keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        try:
+            if key in {"frame_skip", "min_consecutive_hits", "min_face_width_px"}:
+                sanitized[key] = int(value)
+            elif key == "min_det_score":
+                sanitized[key] = float(value)
+            elif key == "auto_degrade_enabled":
+                sanitized[key] = bool(value)
+        except (TypeError, ValueError):
+            continue
+
+    if not sanitized:
+        return {"success": False, "error": "No valid control values."}
+
+    # Read existing controls, then merge.
+    current = {}
+    if os.path.exists(RUNTIME_CONTROL_PATH):
+        try:
+            with open(RUNTIME_CONTROL_PATH, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+                if isinstance(existing, dict):
+                    current = existing
+        except Exception:
+            current = {}
+    current.update(sanitized)
+
+    os.makedirs(os.path.dirname(RUNTIME_CONTROL_PATH), exist_ok=True)
+    with open(RUNTIME_CONTROL_PATH, "w", encoding="utf-8") as f:
+        json.dump(current, f, indent=2)
+
+    return {
+        "success": True,
+        "message": "Runtime control updated.",
+        "control": current,
+    }
 
 @app.get("/api/snapshot/{spg_id}")
 async def api_snapshot(spg_id: str):
