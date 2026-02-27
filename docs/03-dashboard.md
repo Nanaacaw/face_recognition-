@@ -34,8 +34,14 @@ Default URL: `http://localhost:8000`
   - processed fps
   - inference ms
   - queue lag ms
+  - capture -> inference ms
+  - input queue wait ms
+  - post-inference queue ms
   - age
 - Live camera feed (AI overlay MJPEG)
+- Pipeline control:
+  - start/stop `run_outlet` dari dashboard
+  - runtime tuning tanpa edit YAML (via runtime control file)
 
 ## 3. Stream Behavior
 
@@ -55,6 +61,11 @@ Default URL: `http://localhost:8000`
 - `GET /api/health`
 - `GET /api/cameras`
 - `GET /api/snapshot/{spg_id}`
+- `GET /api/pipeline/status`
+- `POST /api/pipeline/start`
+- `POST /api/pipeline/stop`
+- `GET /api/runtime/control`
+- `POST /api/runtime/control`
 - `GET /api/gallery`
 - `POST /api/gallery/enroll`
 - `DELETE /api/gallery/{spg_id}`
@@ -71,3 +82,4 @@ Halaman `/manage` mendukung:
 
 - Dashboard membaca data pipeline dari `data/<sim_output_subdir>`.
 - Jika pipeline belum jalan, dashboard tetap bisa terbuka tetapi data kosong/offline.
+- Runtime control disimpan di `data/<sim_output_subdir>/runtime_control.json`.

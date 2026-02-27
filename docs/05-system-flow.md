@@ -2,6 +2,49 @@
 
 Dokumen ini menjelaskan alur runtime aktual pada mode multi-camera centralized.
 
+## System Architecture Diagram
+
+```mermaid
+graph TD
+    subgraph "Data Sources"
+        Cam1[Camera 1] -->|RTSP/TCP| Worker1
+        Cam2[Camera 2] -->|RTSP/TCP| Worker2
+        Cam3[Camera 3] -->|RTSP/TCP| Worker3
+    end
+
+    subgraph "Processing Pipeline (Main PC)"
+        subgraph "Camera Workers (Process Pool)"
+            Worker1[Worker 1<br>Decode + Resize]
+            Worker2[Worker 2<br>Decode + Resize]
+            Worker3[Worker 3<br>Decode + Resize]
+        end
+
+        subgraph "Shared Memory"
+            SHM1[Buffer 1]
+            SHM2[Buffer 2]
+            SHM3[Buffer 3]
+        end
+
+        Worker1 --> SHM1
+        Worker2 --> SHM2
+        Worker3 --> SHM3
+
+        InfServer[Inference Server<br>ONNX Runtime]
+        SHM1 & SHM2 & SHM3 -.->|Zero Copy Read| InfServer
+
+        InfServer -->|Results Queue| MainProc[Main Process<br>Aggregator + Logic]
+    end
+
+    subgraph "Outputs"
+        MainProc -->|Events| JSON[Events.jsonl]
+        MainProc -->|State| State[OutletState.json]
+        MainProc -->|Snapshots| Disk[Disk Storage]
+        MainProc -->|Alert| Telegram[Telegram Bot]
+    end
+
+    State & JSON & Disk --> Dashboard[Dashboard Server<br>FastAPI]
+```
+
 ## 1. Operation Modes
 
 ### Single camera

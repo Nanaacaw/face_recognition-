@@ -47,6 +47,17 @@ Urutan prioritas:
 ### `recognition.min_consecutive_hits`
 
 - Type: `int`
+- Fungsi: minimum streak frame match sebelum event `SPG_SEEN` diterima.
+
+### `recognition.min_det_score`
+
+- Type: `float`
+- Fungsi: confidence minimum dari detector sebelum face diproses ke matching.
+
+### `recognition.min_face_width_px`
+
+- Type: `int`
+- Fungsi: minimum lebar wajah (pixel) agar face kecil/noisy tidak ikut matching.
 
 ### `recognition.model_name`
 
@@ -124,6 +135,13 @@ Urutan prioritas:
 
 - Type: `list[{id, rtsp_url}]`
 - Untuk security, isi `rtsp_url` dari env placeholder.
+- Optional field per camera: `roi: [x1, y1, x2, y2]`
+  - Format: normalized `0.0 - 1.0` (recommended)
+  - Fungsi: batasi area deteksi per kamera agar false-positive dan beban inference turun.
+  - Cara gambar ROI cepat:
+    - `python scripts/draw_roi.py --camera-id cam_01`
+    - Drag area di window, tekan `C` untuk confirm.
+    - Copy output `roi: [...]` ke kamera terkait di YAML.
 
 ### `outlet.target_spg_ids`
 
@@ -234,7 +252,7 @@ Optional:
 ### Demo
 
 - `process_fps` lebih tinggi
-- `frame_skip` dasar rendah (`0`)
+- `frame_skip` dasar rendah (`0` atau `1`)
 - stream interval lebih cepat
 
 ### Production
