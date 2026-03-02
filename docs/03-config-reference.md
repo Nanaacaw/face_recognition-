@@ -1,264 +1,184 @@
 # Configuration Reference
 
-Semua runtime behavior dibaca dari YAML config + env variables.
+Dokumen ini mengacu ke schema aktual di `src/settings/settings.py`.
 
-## 1. Config Resolution
+## 1. Resolusi Config
 
 Urutan prioritas:
 
-1. `APP_CONFIG_PATH`
-2. `APP_ENV` -> `configs/app.<env>.yaml`
-3. default `dev`
+1. Argumen CLI `--config`
+2. Env `APP_CONFIG_PATH`
+3. Env `APP_ENV` -> `configs/app.<env>.yaml` (default `dev`)
 
-## 2. camera
+## 2. `camera`
 
-### `camera.source`
+Dipakai terutama oleh mode single-camera (`src.app run`) dan sebagai source `process_fps` di mode outlet.
 
-- Type: `string`
-- Allowed: `webcam | rtsp`
+- `source` (`string`): `webcam | rtsp`
+- `webcam_index` (`int | null`)
+- `rtsp_url` (`string | null`)
+- `process_fps` (`int`)
+- `preview` (`bool`)
 
-### `camera.webcam_index`
+## 3. `recognition`
 
-- Type: `int | null`
-- Dipakai saat `camera.source=webcam`
+- `threshold` (`float`): threshold similarity matcher
+- `min_consecutive_hits` (`int`): minimum streak match sebelum event `SPG_SEEN` diterima
+- `min_det_score` (`float`): minimum detector confidence
+- `min_face_width_px` (`int`): minimum lebar wajah
+- `model_name` (`string`): contoh `buffalo_s`, `buffalo_l`
+- `execution_providers` (`list[string]`): ONNX provider priority
+- `det_size` (`tuple[int,int] | list[int,int]`)
 
-### `camera.rtsp_url`
+## 4. `presence`
 
-- Type: `string | null`
-- Dipakai saat `camera.source=rtsp`
-- Rekomendasi: `${RTSP_CAM_01_URL}`
+- `grace_seconds` (`int`)
+- `absent_seconds` (`int`)
 
-### `camera.process_fps`
+## 5. `storage`
 
-- Type: `int`
-- Fungsi: membatasi rate frame yang diproses pipeline
+- `data_dir` (`string`)
+- `snapshot_enabled` (`bool`)
+- `snapshot_retention_days` (`int`)
+- `sim_output_subdir` (`string`, default `sim_output`)
+- `gallery_subdir` (`string`, default `gallery`)
 
-### `camera.preview`
+Catatan:
 
-- Type: `bool`
-- Menyalakan preview OpenCV window
+- `sim_output_subdir` dipakai pipeline + dashboard untuk state/health/events/live-frame
+- `gallery_subdir` dipakai enrollment, gallery loader, dan endpoint gallery dashboard
 
-## 3. recognition
+## 6. `target` (single-camera mode)
 
-### `recognition.threshold`
+- `spg_ids` (`list[string]`)
+- `outlet_id` (`string`)
+- `camera_id` (`string`)
 
-- Type: `float`
+## 7. `outlet` (multi-camera mode / `run_outlet`)
 
-### `recognition.min_consecutive_hits`
+- `id` (`string`)
+- `name` (`string`)
+- `cameras` (`list[CameraEntry]`)
+  - `id` (`string`)
+  - `rtsp_url` (`string`)
+  - `roi` (`tuple[float,float,float,float] | null`)
+- `target_spg_ids` (`list[string]`)
 
-- Type: `int`
-- Fungsi: minimum streak frame match sebelum event `SPG_SEEN` diterima.
+`run_outlet` akan exit jika blok `outlet` tidak ada.
 
-### `recognition.min_det_score`
+### ROI Notes
 
-- Type: `float`
-- Fungsi: confidence minimum dari detector sebelum face diproses ke matching.
+- Format normalized dianjurkan: `[x1, y1, x2, y2]` rentang `0.0..1.0`
+- Pixel absolute juga didukung
+- ROI invalid/kecil akan diabaikan
 
-### `recognition.min_face_width_px`
+Tool bantu:
 
-- Type: `int`
-- Fungsi: minimum lebar wajah (pixel) agar face kecil/noisy tidak ikut matching.
+- `make draw-roi`
+- `make draw-roi CAMERA_ID=cam_01`
 
-### `recognition.model_name`
+## 8. `inference`
 
-- Type: `string`
-- Default: `buffalo_s`
+- `frame_skip` (`int`): 0 = proses semua frame
+- `max_frame_height` (`int`)
+- `max_frame_width` (`int`)
 
-### `recognition.execution_providers`
+## 9. `notification`
 
-- Type: `list[string]`
-- Contoh: `["CUDAExecutionProvider", "CPUExecutionProvider"]`
+- `telegram_enabled` (`bool`)
+- `telegram_bot_token_env` (`string`)
+- `telegram_chat_id_env` (`string`)
+- `timeout_sec` (`int`)
+- `max_retries` (`int`)
+- `retry_backoff_base_sec` (`int`)
+- `retry_after_default_sec` (`int`)
 
-### `recognition.det_size`
+## 10. `dev`
 
-- Type: `list[int, int]` atau `tuple[int, int]`
+- `simulate` (`bool`)
+- `video_files` (`list[string]`)
 
-## 4. presence
+Jika `simulate=true` dan `video_files` terisi, `run_outlet` pakai file video sebagai source.
 
-### `presence.grace_seconds`
-
-- Type: `int`
-
-### `presence.absent_seconds`
-
-- Type: `int`
-
-## 5. storage
-
-### `storage.data_dir`
-
-- Type: `string`
-
-### `storage.snapshot_enabled`
-
-- Type: `bool`
-
-### `storage.snapshot_retention_days`
-
-- Type: `int`
-
-### `storage.sim_output_subdir`
-
-- Type: `string`
-- Default: `sim_output`
-
-### `storage.gallery_subdir`
-
-- Type: `string`
-- Default: `gallery`
-
-## 6. target (single-camera mode)
-
-### `target.spg_ids`
-
-- Type: `list[string]`
-
-### `target.outlet_id`
-
-- Type: `string`
-
-### `target.camera_id`
-
-- Type: `string`
-
-## 7. outlet (multi-camera mode)
-
-### `outlet.id`
-
-- Type: `string`
-
-### `outlet.name`
-
-- Type: `string`
-
-### `outlet.cameras`
-
-- Type: `list[{id, rtsp_url}]`
-- Untuk security, isi `rtsp_url` dari env placeholder.
-- Optional field per camera: `roi: [x1, y1, x2, y2]`
-  - Format: normalized `0.0 - 1.0` (recommended)
-  - Fungsi: batasi area deteksi per kamera agar false-positive dan beban inference turun.
-  - Cara gambar ROI cepat:
-    - `make draw-roi` (pakai snapshot pertama di data/sim_output)
-    - `make draw-roi CAMERA_ID=cam_01` (snapshot kamera tertentu)
-    - Drag area di window, tekan `C` untuk confirm.
-    - Copy output `roi: [...]` ke kamera terkait di YAML.
-
-### `outlet.target_spg_ids`
-
-- Type: `list[string]`
-
-## 8. inference
-
-### `inference.frame_skip`
-
-- Type: `int`
-- `0` = proses semua frame
-
-### `inference.max_frame_height`
-
-- Type: `int`
-
-### `inference.max_frame_width`
-
-- Type: `int`
-
-## 9. notification
-
-### `notification.telegram_enabled`
-
-- Type: `bool`
-
-### `notification.telegram_bot_token_env`
-
-- Type: `string`
-- Default: `SPG_TELEGRAM_BOT_TOKEN`
-
-### `notification.telegram_chat_id_env`
-
-- Type: `string`
-- Default: `SPG_TELEGRAM_CHAT_ID`
-
-### `notification.timeout_sec`
-
-- Type: `int`
-
-### `notification.max_retries`
-
-- Type: `int`
-
-### `notification.retry_backoff_base_sec`
-
-- Type: `int`
-
-### `notification.retry_after_default_sec`
-
-- Type: `int`
-
-## 10. runtime
+## 11. `runtime`
 
 ### Loop
 
-- `runtime.worker_idle_sleep_sec` (`float`)
-- `runtime.main_loop_sleep_sec` (`float`)
+- `worker_idle_sleep_sec` (`float`)
+- `main_loop_sleep_sec` (`float`)
 
-### Supervisor (self-healing)
+### Supervisor
 
-- `runtime.supervisor_restart_cooldown_sec` (`float`)
-- `runtime.supervisor_max_restarts_per_minute` (`int`)
+- `supervisor_restart_cooldown_sec` (`float`)
+- `supervisor_max_restarts_per_minute` (`int`)
 
-### Adaptive degrade
+### Auto-degrade
 
-- `runtime.auto_degrade_enabled` (`bool`)
-- `runtime.auto_degrade_lag_high_ms` (`float`)
-- `runtime.auto_degrade_lag_low_ms` (`float`)
-- `runtime.auto_degrade_high_streak` (`int`)
-- `runtime.auto_degrade_low_streak` (`int`)
-- `runtime.auto_degrade_max_frame_skip` (`int`)
+- `auto_degrade_enabled` (`bool`)
+- `auto_degrade_lag_high_ms` (`float`)
+- `auto_degrade_lag_low_ms` (`float`)
+- `auto_degrade_high_streak` (`int`)
+- `auto_degrade_low_streak` (`int`)
+- `auto_degrade_max_frame_skip` (`int`)
 
-### Preview persistence
+### Preview writer
 
-- `runtime.preview_raw_enabled` (`bool`)
-- `runtime.preview_frame_save_interval_sec` (`float`)
-- `runtime.preview_frame_width` (`int`)
-- `runtime.preview_jpeg_quality` (`int`)
+- `preview_raw_enabled` (`bool`)
+- `preview_frame_save_interval_sec` (`float`)
+- `preview_frame_width` (`int`)
+- `preview_jpeg_quality` (`int`)
 
-## 11. dashboard
+## 12. `dashboard`
 
-- `dashboard.host` (`string`)
-- `dashboard.port` (`int`)
-- `dashboard.reload` (`bool`)
-- `dashboard.live_window_seconds` (`int`)
-- `dashboard.recent_events_limit` (`int`)
-- `dashboard.stream_frame_interval_sec` (`float`)
-- `dashboard.stream_error_sleep_sec` (`float`)
-- `dashboard.stream_missing_frame_sleep_sec` (`float`)
+- `host` (`string`)
+- `port` (`int`)
+- `reload` (`bool`)
+- `live_window_seconds` (`int`)
+- `recent_events_limit` (`int`)
+- `stream_frame_interval_sec` (`float`)
+- `stream_error_sleep_sec` (`float`)
+- `stream_missing_frame_sleep_sec` (`float`)
 
-## 12. Required Environment Variables
+## 13. Environment Variables
+
+Wajib untuk mode RTSP outlet:
 
 - `RTSP_CAM_01_URL`
 - `RTSP_CAM_02_URL`
 - `RTSP_CAM_03_URL`
 - `RTSP_CAM_04_URL`
 
-Optional:
+Opsional:
 
 - `SPG_TELEGRAM_BOT_TOKEN`
 - `SPG_TELEGRAM_CHAT_ID`
 - `APP_ENV`
 - `APP_CONFIG_PATH`
 
-## 13. Profile Recommendations
+## 14. Runtime Control File
 
-### Demo
+Path:
 
+- `<storage.data_dir>/<storage.sim_output_subdir>/runtime_control.json`
+
+Field yang dibaca:
+
+- `frame_skip`
+- `min_consecutive_hits`
+- `min_det_score`
+- `min_face_width_px`
+- `auto_degrade_enabled`
+
+## 15. Profil Praktis
+
+### Demo/dev
+
+- `frame_skip` rendah
 - `process_fps` lebih tinggi
-- `frame_skip` dasar rendah (`0` atau `1`)
-- stream interval lebih cepat
+- stream interval kecil
 
-### Production
+### Prod
 
-- `process_fps` moderat
-- `frame_skip` dasar `1`
-- auto-degrade tetap aktif untuk spike handling
+- `frame_skip` moderat
+- auto-degrade aktif
 - preview width/quality lebih hemat

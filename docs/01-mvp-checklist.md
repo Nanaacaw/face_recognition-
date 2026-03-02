@@ -1,48 +1,60 @@
 # MVP Checklist
 
-## A. Setup and Config
+Checklist ini merepresentasikan status implementasi sistem saat ini.
 
-- [x] `environment.yml` valid dan environment bisa dibuat.
-- [x] Konfigurasi dibaca dari YAML + env.
-- [x] Support quick switch config via command dan Makefile.
-- [x] `.env.example` tersedia tanpa secret real.
+## A. Setup & Config
 
-## B. Security and Secrets
+- [x] Load config via `--config`, `APP_CONFIG_PATH`, atau `APP_ENV`
+- [x] Profile config tersedia: dev, staging, prod
+- [x] Placeholder env untuk RTSP URL didukung
+- [x] `.env.example` tersedia tanpa secret real
 
-- [x] RTSP URL memakai env placeholder (`${RTSP_CAM_XX_URL}`).
-- [x] Guard fail-fast saat RTSP env belum diisi pada mode RTSP.
-- [x] Telegram token/chat id dibaca dari env.
+## B. Pipeline Core
 
-## C. Pipeline Core
+- [x] Multi-camera dengan centralized inference process
+- [x] Shared memory path + queue fallback path
+- [x] Event `SPG_SEEN` per kamera
+- [x] Aggregator outlet-level untuk status kehadiran
+- [x] Presence status: PRESENT / ABSENT / NEVER_ARRIVED / NOT_SEEN_YET
 
-- [x] Inference centralized untuk multi-camera.
-- [x] Presence logic outlet level (ANY-of-N).
-- [x] Event logging per kamera.
-- [x] Alert absence anti-spam.
+## C. Reliability
 
-## D. Resilience
+- [x] Supervisor restart untuk inference process
+- [x] Supervisor restart untuk worker per kamera
+- [x] Restart budget guard untuk cegah crash loop
+- [x] RTSP reconnect exponential backoff + jitter
+- [x] Auto-degrade `frame_skip` berbasis queue lag
 
-- [x] Supervisor restart inference process.
-- [x] Supervisor restart worker per kamera.
-- [x] Restart budget guard untuk mencegah crash loop.
-- [x] RTSP reconnect exponential backoff + jitter.
-- [x] Auto-degrade runtime (`frame_skip`) saat lag tinggi.
+## D. Runtime Observability
+
+- [x] `outlet_state.json` periodik
+- [x] `camera_health.json` periodik
+- [x] Event log `events.jsonl` per kamera
+- [x] Runtime control file (`runtime_control.json`) untuk tuning parameter tertentu
 
 ## E. Dashboard
 
-- [x] Monitoring status SPG dan events.
-- [x] Camera health card (status/fps/lag/inference).
-- [x] AI stream MJPEG stabil (last-good-frame fallback).
-- [x] Raw view dihapus dari UI demo agar lebih fokus.
+- [x] Halaman monitoring (`/`)
+- [x] Camera health cards
+- [x] MJPEG AI stream per kamera
+- [x] Feed recent events
+- [x] Halaman manage SPG (`/manage`)
 
 ## F. Enrollment
 
-- [x] Manage SPG via dashboard.
-- [x] Upload foto untuk enrollment.
-- [x] Hapus SPG dari gallery.
+- [x] Enrollment via upload foto (dashboard)
+- [x] Enrollment via webcam (dashboard)
+- [x] Enrollment via CLI (`src.app enroll`)
+- [x] Delete SPG dari gallery
 
-## G. Operational Readiness
+## G. Notification
 
-- [x] Profil default untuk demo/dev, staging, dan production.
-- [x] Dokumentasi command run pipeline + dashboard sudah sinkron.
-- [x] Daily report tersedia untuk tracking progres harian.
+- [x] Telegram notifier berbasis env token/chat id
+- [x] Retry + backoff untuk request Telegram
+- [x] Snapshot evidence saat alert absence
+
+## H. Security & Data Hygiene
+
+- [x] Mask credential RTSP di log
+- [x] Snapshot cleaner berdasarkan retention days
+- [x] Pemisahan data runtime dan gallery via subdir config

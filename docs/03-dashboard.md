@@ -1,54 +1,50 @@
 # Dashboard Monitoring
 
-Dashboard digunakan untuk monitoring realtime dan manajemen SPG.
+Dashboard adalah proses terpisah yang membaca artifact runtime dari pipeline.
 
-## 1. Run
-
-Demo:
+## 1. Menjalankan Dashboard
 
 ```bash
 make dashboard-demo
-```
-
-Staging:
-
-```bash
 make dashboard-staging
+make dashboard-prod
 ```
 
-Production:
+Atau:
 
 ```bash
-make dashboard-prod
+python -m src.commands.run_dashboard --config configs/app.dev.yaml
 ```
 
 Default URL: `http://localhost:8000`
 
-## 2. Main Features
+## 2. Halaman
 
-- Outlet status (`LIVE` / `OFFLINE`)
-- Personnel cards (`PRESENT`, `ABSENT`, `NEVER_ARRIVED`, `NOT_SEEN_YET`)
-- Recent events feed
-- **Camera Health**: satu kartu per kamera dengan metrik lengkap:
-  - status (LIVE / STALE / OFFLINE)
-  - source type, processed FPS, inference ms, queue lag ms
-  - capture→inference ms, input queue wait ms, post-inference queue ms
+- `/`: monitoring outlet realtime
+- `/manage`: enrollment + manajemen SPG
+
+## 3. Fitur Halaman Monitoring (`/`)
+
+- status sistem (`LIVE` / `OFFLINE`)
+- statistik personnel (total/present/absent/rate)
+- kartu status SPG (PRESENT/ABSENT/NEVER_ARRIVED/NOT_SEEN_YET)
+- feed event terbaru
+- camera health cards:
+  - status kamera (`LIVE`, `STALE`, `OFFLINE`)
+  - processed FPS
+  - inference time, queue lag
+  - capture->inference, queue wait, post-inference queue
   - last result age, events count
-- Live camera feed (AI overlay MJPEG)
+- live stream MJPEG per kamera (`latest_frame.jpg`)
 
+## 4. Fitur Halaman Manage (`/manage`)
 
-## 3. Stream Behavior
+- list gallery SPG
+- enroll SPG via upload (max 5 foto)
+- enroll SPG via webcam browser
+- hapus SPG dari gallery
 
-- UI menampilkan AI view saja (raw view dihapus untuk fokus demo).
-- Endpoint stream:
-  - `/stream/{cam_id}`
-  - `/stream_raw/{cam_id}` (masih tersedia backend, tidak ditampilkan di UI utama)
-- Stream stabilisasi:
-  - preview writer atomic file replace
-  - last-good-frame fallback di API
-  - response header no-cache
-
-## 4. API Endpoints
+## 5. API Endpoints
 
 - `GET /api/state`
 - `GET /api/events`
@@ -56,19 +52,30 @@ Default URL: `http://localhost:8000`
 - `GET /api/cameras`
 - `GET /api/snapshot/{spg_id}`
 - `GET /api/gallery`
+- `GET /api/gallery/{spg_id}/photo`
 - `POST /api/gallery/enroll`
 - `DELETE /api/gallery/{spg_id}`
+- `GET /stream/{cam_id}`
+- `GET /stream_raw/{cam_id}`
 
-## 5. Manage SPG
+## 6. Data Source Dashboard
 
-Halaman `/manage` mendukung:
+Dashboard membaca path dari config:
 
-- enroll via upload foto
-- daftar gallery
-- hapus SPG
+- data runtime:
+  - `<storage.data_dir>/<storage.sim_output_subdir>`
+- gallery:
+  - `<storage.data_dir>/<storage.gallery_subdir>`
 
-## 6. Notes
+Pastikan pipeline dan dashboard memakai profile config yang sama.
 
-- Dashboard membaca data pipeline dari `data/<sim_output_subdir>` (path `storage.data_dir` di config di-resolve ke absolut terhadap project root, sehingga dashboard dan pipeline memakai direktori yang sama).
-- Pastikan dashboard dan pipeline dijalankan dengan config yang sama (mis. sama-sama `app.dev.yaml`) agar Camera Health dan state tampil benar.
-- Jika pipeline belum jalan, dashboard tetap bisa terbuka tetapi data kosong/offline.
+## 7. Stream Stabilization
+
+- preview frame ditulis worker secara atomic replace
+- stream endpoint validasi boundary JPEG
+- jika frame terbaru invalid/hilang, pakai last-good-frame
+
+## 8. Catatan Operasional
+
+- Dashboard tetap bisa start tanpa pipeline, tetapi data kosong/offline
+- `stream_raw` tersedia di backend walau UI utama fokus pada AI stream

@@ -1,70 +1,88 @@
 # Architecture
 
-## 1. High Level
+## 1. High-Level Topology
 
 ```text
-Camera Workers (N) -> InferenceServer (1) -> Main Loop (Router + Aggregator) -> Storage + Notifier
-                                                       |
-                                                       +-> Dashboard API
+Camera Workers (N)
+  -> input_queue (+ shared memory buffers per camera)
+  -> Inference Server (1)
+  -> output_queue
+  -> Main Loop (Aggregator + Supervisor + Notifier)
+  -> JSON/JPEG artifacts
+  -> Dashboard API/UI
 ```
 
 ## 2. Process Model
 
-- `run_outlet` main process:
-  - routing result
-  - presence aggregation
-  - alert dispatch
-  - health/state dump
-- `InferenceServer` child process:
-  - face detection + matching
-  - shared memory or queue input
-- `CameraWorker` per kamera:
-  - capture frame
-  - kirim metadata/frame ke inference
-  - simpan preview AI frame untuk dashboard
-- `FastAPI dashboard` process terpisah:
-  - API state/events/camera list
-  - stream endpoint MJPEG
-  - UI monitoring dan manage SPG
+### `run_outlet` (main process)
 
-## 3. Core Components
+- load config
+- spawn inference process
+- spawn worker process per kamera
+- jalankan loop:
+  - supervise restart
+  - aggregate events
+  - evaluate absence
+  - emit health/state JSON
 
-- `RTSPReader` / `WebcamReader`
-- `SharedFrameBuffer`
-- `FaceDetector`
-- `Matcher`
-- `OutletAggregator`
-- `EventStore` / `GalleryStore`
-- `TelegramNotifier`
+### Camera worker process (`worker_camera_capture`)
 
-## 4. Reliability Design
+- read frame dari RTSP/webcam/file
+- throttle by `camera.process_fps`
+- kirim metadata + frame pointer (shared memory) ke inference
+- terima feedback inference untuk overlay
+- simpan preview frame untuk dashboard
 
-- Supervisor restart:
-  - inference process auto restart
-  - worker kamera auto restart per camera
-- Restart budget guard:
-  - membatasi restart per menit untuk menghindari crash loop
-- Adaptive degrade:
-  - `frame_skip` dinaikkan saat `queue_lag_ms` tinggi
-  - diturunkan kembali saat lag stabil rendah
-- RTSP reconnect:
-  - exponential backoff + jitter
-  - non-blocking retry schedule
+### Inference server process (`InferenceServer`)
 
-## 5. Dashboard Stream Design
+- load model detector 1x
+- load gallery embeddings 1x
+- infer frame dari semua kamera
+- apply runtime gate:
+  - `frame_skip`
+  - `min_det_score`
+  - `min_face_width_px`
+  - ROI per kamera
 
-- Stream browser membaca `latest_frame.jpg` (AI overlay).
-- Worker menulis JPEG secara atomic (temp file + replace).
-- API stream menyimpan last-good-frame fallback untuk mengurangi blink/blank.
+### Dashboard process (`run_dashboard` / `src.frontend.main`)
 
-## 6. Security Design
+- baca file output pipeline
+- expose API + MJPEG stream
+- serve halaman monitoring dan manage SPG
 
-- Secret dan credential disimpan di `.env`.
-- YAML config hanya menyimpan placeholder env.
-- Pipeline fail-fast jika RTSP env belum diisi saat mode RTSP aktif.
+## 3. Komponen Utama
 
-## 7. Deployment Profiles
+- `src/commands/run_outlet.py`
+- `src/pipeline/inference_server.py`
+- `src/pipeline/outlet_aggregator.py`
+- `src/pipeline/rtsp_reader.py`
+- `src/pipeline/shared_frame_buffer.py`
+- `src/frontend/main.py`
+- `src/storage/*`
 
-- `dev`: smooth demo, lebih responsif.
-- `staging`: profil uji lapangan.
-- `prod`: lebih efisien resource dan stabil untuk operasi jangka panjang.
+## 4. Resilience Design
+
+- Restart cooldown dan restart budget per menit
+- Worker restart dilakukan per kamera (isolated failure)
+- Inference restart terpisah dari worker
+- RTSP reconnect pakai exponential backoff + jitter
+- Auto-degrade menyesuaikan `frame_skip` berdasarkan lag
+
+## 5. Data Contract (Pipeline -> Dashboard)
+
+- `outlet_state.json`: status SPG per outlet
+- `camera_health.json`: metrik kesehatan kamera + supervisor
+- `cam_XX/events.jsonl`: event timeline
+- `cam_XX/snapshots/latest_frame.jpg`: stream frame AI overlay
+
+## 6. Runtime Tuning Contract
+
+Pipeline membaca `runtime_control.json` untuk update parameter runtime tanpa restart (subset parameter).
+
+## 7. Separation of Concerns
+
+- Reader: akuisisi frame + reconnect
+- Inference: detect + match
+- Aggregator: domain presence outlet
+- Storage: persist event/snapshot/gallery
+- Frontend API: read model untuk UI, bukan compute model
