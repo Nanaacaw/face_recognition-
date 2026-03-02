@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import cv2
 
+from src.settings.logger import logger
+
 
 WINDOW_NAME = "ROI Drawer"
 
@@ -97,12 +99,12 @@ def main() -> int:
     try:
         img_path = _resolve_image_path(args.camera_id, args.image, args.data_dir)
     except Exception as exc:
-        print(f"[ERR] {exc}")
+        logger.error("%s", exc)
         return 1
 
     frame = cv2.imread(img_path)
     if frame is None:
-        print(f"[ERR] Failed to read image: {img_path}")
+        logger.error("Failed to read image: %s", img_path)
         return 1
 
     h, w = frame.shape[:2]
@@ -111,9 +113,9 @@ def main() -> int:
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.setMouseCallback(WINDOW_NAME, _mouse_callback, state)
 
-    print(f"[ROI] Source: {img_path}")
-    print("[ROI] Drag mouse to draw rectangle.")
-    print("[ROI] Controls: C/Enter=confirm, R=reset, Q/Esc=quit")
+    logger.info("Source: %s", img_path)
+    logger.info("Drag mouse to draw rectangle.")
+    logger.info("Controls: C/Enter=confirm, R=reset, Q/Esc=quit")
 
     while True:
         canvas = frame.copy()
@@ -143,7 +145,7 @@ def main() -> int:
         key = cv2.waitKey(20) & 0xFF
 
         if key in (ord("q"), 27):
-            print("[ROI] Canceled.")
+            logger.info("Canceled.")
             cv2.destroyAllWindows()
             return 0
 
@@ -153,14 +155,14 @@ def main() -> int:
 
         if key in (ord("c"), 13):
             if bbox is None:
-                print("[ROI] Draw a rectangle first.")
+                logger.warning("Draw a rectangle first.")
                 continue
 
             nx1, ny1, nx2, ny2 = _to_normalized(bbox, w, h)
-            print("[ROI] Done.")
-            print(f"roi: [{nx1:.4f}, {ny1:.4f}, {nx2:.4f}, {ny2:.4f}]")
+            logger.info("Done.")
+            logger.info("roi: [%.4f, %.4f, %.4f, %.4f]", nx1, ny1, nx2, ny2)
             if args.camera_id:
-                print(f"camera_id={args.camera_id}")
+                logger.info("camera_id=%s", args.camera_id)
             cv2.destroyAllWindows()
             return 0
 

@@ -139,7 +139,8 @@ Urutan prioritas:
   - Format: normalized `0.0 - 1.0` (recommended)
   - Fungsi: batasi area deteksi per kamera agar false-positive dan beban inference turun.
   - Cara gambar ROI cepat:
-    - `python scripts/draw_roi.py --camera-id cam_01`
+    - `make draw-roi` (pakai snapshot pertama di data/sim_output)
+    - `make draw-roi CAMERA_ID=cam_01` (snapshot kamera tertentu)
     - Drag area di window, tekan `C` untuk confirm.
     - Copy output `roi: [...]` ke kamera terkait di YAML.
 

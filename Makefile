@@ -1,4 +1,4 @@
-.PHONY: install update run enroll debug help simulate simulate-light dashboard webcam run-demo run-staging run-prod dashboard-demo dashboard-staging dashboard-prod
+.PHONY: install update run enroll debug help simulate simulate-light dashboard webcam run-demo run-staging run-prod dashboard-demo dashboard-staging dashboard-prod draw-roi
 
 help:
 	@echo "face_recog — targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  make dashboard-demo — dashboard pakai configs/app.dev.yaml"
 	@echo "  make dashboard-staging — dashboard pakai configs/app.staging.yaml"
 	@echo "  make dashboard-prod — dashboard pakai configs/app.prod.yaml"
+	@echo "  make draw-roi       — draw ROI pada snapshot kamera, output koordinat untuk config"
 
 install:
 	conda env create -f environment.yml
@@ -72,3 +73,8 @@ dashboard-staging:
 dashboard-prod:
 	@echo "Starting Dashboard (PROD config) ..."
 	python -m src.commands.run_dashboard --config configs/app.prod.yaml
+
+draw-roi:
+	@echo "ROI Drawer: drag untuk gambar kotak, C/Enter=confirm, R=reset, Q=quit"
+	@echo "Usage: make draw-roi [CAMERA_ID=cam_01] [IMAGE=/path/to/img.jpg] [DATA_DIR=./data/sim_output]"
+	python -m src.tools.draw_roi $(if $(CAMERA_ID),--camera-id $(CAMERA_ID)) $(if $(IMAGE),--image $(IMAGE)) $(if $(DATA_DIR),--data-dir $(DATA_DIR))

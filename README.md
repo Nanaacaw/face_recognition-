@@ -1,13 +1,48 @@
-# face_recognition
+# SPG Attendance Monitoring System
 
-Sistem monitoring kehadiran SPG berbasis face recognition.
-Pipeline memproses stream kamera, menghasilkan event presence, dan mengirim alert Telegram saat SPG target tidak terlihat melebihi batas waktu.
+Sistem pemantauan kehadiran SPG cerdas berbasis Face Recognition dengan dukungan Multi-Kamera, Real-time Dashboard, dan Notifikasi Telegram.
+
+## System Flow
+
+```mermaid
+graph TD
+    subgraph "Edge Device (Store PC)"
+        Cam1[Camera 1] -->|RTSP| Worker1[Worker Process 1]
+        Cam2[Camera 2] -->|RTSP| Worker2[Worker Process 2]
+        CamN[Camera N] -->|RTSP| WorkerN[Worker Process N]
+        
+        subgraph "Data Pipeline"
+            Worker1 & Worker2 & WorkerN -->|Shared Memory| InfServer[Inference Server]
+            InfServer -->|Face Data| MainProc[Main Process]
+            
+            MainProc -->|Aggregated Events| DB[(Local JSON Storage)]
+            MainProc -->|Presence Logic| AlertSys[Alert System]
+        end
+        
+        DB --> Dashboard[Dashboard Server]
+    end
+    
+    subgraph "External"
+        AlertSys -->|Msg + Photo| Telegram[Telegram Bot]
+        Dashboard -->|Web UI| Browser[Supervisor Monitor]
+    end
+```
+
+## Key Features
+
+*   **Multi-Camera Support**: Menghubungkan banyak CCTV dalam satu outlet.
+*   **Centralized AI**: Satu model AI melayani semua kamera (Hemat Resource).
+*   **Real-time Dashboard**: Live view, status kehadiran, dan log event.
+*   **Smart Alerts**: Notifikasi Telegram saat SPG tidak terlihat (Absent) atau belum datang (Never Arrived).
+*   **Evidence**: Menyertakan foto snapshot saat alert dikirim.
+*   **Robustness**: Auto-reconnect RTSP, Auto-restart crash, & Auto-degrade saat lag.
 
 ## Prerequisites
 
-- Windows
-- Conda
-- Kamera webcam atau RTSP
+- Windows 10/11
+- Python 3.10+ (via Conda recommended)
+- CCTV Camera (RTSP) atau Webcam
+- NVIDIA GPU (Optional, recommended for `buffalo_l` model)
 
 ## Setup
 
@@ -17,86 +52,40 @@ conda activate face_recog
 copy .env.example .env
 ```
 
-Isi `.env` minimal:
+Isi `.env` dengan kredensial kamera dan Telegram token Anda.
 
-- `SPG_TELEGRAM_BOT_TOKEN` (opsional jika notifikasi aktif)
-- `SPG_TELEGRAM_CHAT_ID` (opsional jika notifikasi aktif)
-- `RTSP_CAM_01_URL`
-- `RTSP_CAM_02_URL`
-- `RTSP_CAM_03_URL`
-- `RTSP_CAM_04_URL`
+## Quick Start
 
-Config resolution:
+Jalankan sistem dalam mode **Demo** (menggunakan config `configs/app.dev.yaml`):
 
-1. `APP_CONFIG_PATH` (jika diisi)
-2. `APP_ENV` -> `configs/app.<env>.yaml`
-3. default `dev`
-
-## Quick Run
-
-Jalankan pipeline dan dashboard di terminal terpisah.
-
-Demo:
-
+**Terminal 1 (Pipeline):**
 ```bash
 make run-demo
+```
+
+**Terminal 2 (Dashboard):**
+```bash
 make dashboard-demo
 ```
 
-Staging:
+Buka browser di `http://localhost:8000`.
 
-```bash
-make run-staging
-make dashboard-staging
-```
+## Configuration Guide
 
-Production:
+File konfigurasi utama ada di `configs/app.dev.yaml`. Beberapa setting penting:
 
-```bash
-make run-prod
-make dashboard-prod
-```
-
-Dashboard default: `http://localhost:8000`
-
-## Main Commands
-
-| Command | Description |
-|---|---|
-| `make run` | Run multi-camera pipeline with current env config |
-| `make run-demo` | Run pipeline with `configs/app.dev.yaml` |
-| `make run-staging` | Run pipeline with `configs/app.staging.yaml` |
-| `make run-prod` | Run pipeline with `configs/app.prod.yaml` |
-| `make simulate` | Simulation mode with preview window |
-| `make simulate-light` | Simulation mode without preview window |
-| `make dashboard` | Run dashboard with current env config |
-| `make dashboard-demo` | Run dashboard with `configs/app.dev.yaml` |
-| `make dashboard-staging` | Run dashboard with `configs/app.staging.yaml` |
-| `make dashboard-prod` | Run dashboard with `configs/app.prod.yaml` |
-| `make enroll` | Enroll sample SPG via CLI |
-| `make debug` | Preview + face detection debug |
-
-## Security Notes
-
-- Jangan hardcode RTSP credential di file YAML.
-- Gunakan placeholder env di config, contoh: `${RTSP_CAM_01_URL}`.
-- Jangan commit `.env` ke repository.
-- Jika credential pernah terlanjur ter-push, lakukan rotate credential kamera.
-
-## Key Runtime Features
-
-- Centralized inference (1 model process untuk banyak kamera)
-- Worker supervisor restart (self-healing per process)
-- Adaptive auto-degrade (`frame_skip` naik turun otomatis saat lag tinggi)
-- RTSP reconnect exponential backoff + jitter
-- Dashboard MJPEG AI view dengan fallback frame terakhir agar lebih stabil
+*   **Recognition**:
+    *   `model_name`: `buffalo_s` (Cepat) atau `buffalo_l` (Akurat).
+    *   `det_size`: Resolusi input deteksi (e.g., `[640, 640]`).
+*   **Performance**:
+    *   `process_fps`: Target FPS (e.g., `8` - `12`).
+    *   `frame_skip`: Skip frame untuk hemat CPU.
+*   **Presence**:
+    *   `absent_seconds`: Batas waktu sebelum dianggap Absent (e.g., `300` detik).
 
 ## Documentation
 
-- `docs/00-spec.md`
-- `docs/01-mvp-checklist.md`
-- `docs/02-architecture.md`
-- `docs/03-config-reference.md`
-- `docs/03-dashboard.md`
-- `docs/04-enrollment-guidelines.md`
-- `docs/05-system-flow.md`
+*   [System Spec](docs/00-spec.md)
+*   [Architecture](docs/02-architecture.md)
+*   [System Flow & Diagrams](docs/05-system-flow.md)
+*   [Config Reference](docs/03-config-reference.md)

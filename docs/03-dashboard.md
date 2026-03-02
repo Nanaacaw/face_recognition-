@@ -29,19 +29,13 @@ Default URL: `http://localhost:8000`
 - Outlet status (`LIVE` / `OFFLINE`)
 - Personnel cards (`PRESENT`, `ABSENT`, `NEVER_ARRIVED`, `NOT_SEEN_YET`)
 - Recent events feed
-- Camera health cards:
-  - status
-  - processed fps
-  - inference ms
-  - queue lag ms
-  - capture -> inference ms
-  - input queue wait ms
-  - post-inference queue ms
-  - age
+- **Camera Health**: satu kartu per kamera dengan metrik lengkap:
+  - status (LIVE / STALE / OFFLINE)
+  - source type, processed FPS, inference ms, queue lag ms
+  - capture→inference ms, input queue wait ms, post-inference queue ms
+  - last result age, events count
 - Live camera feed (AI overlay MJPEG)
-- Pipeline control:
-  - start/stop `run_outlet` dari dashboard
-  - runtime tuning tanpa edit YAML (via runtime control file)
+
 
 ## 3. Stream Behavior
 
@@ -61,11 +55,6 @@ Default URL: `http://localhost:8000`
 - `GET /api/health`
 - `GET /api/cameras`
 - `GET /api/snapshot/{spg_id}`
-- `GET /api/pipeline/status`
-- `POST /api/pipeline/start`
-- `POST /api/pipeline/stop`
-- `GET /api/runtime/control`
-- `POST /api/runtime/control`
 - `GET /api/gallery`
 - `POST /api/gallery/enroll`
 - `DELETE /api/gallery/{spg_id}`
@@ -80,6 +69,6 @@ Halaman `/manage` mendukung:
 
 ## 6. Notes
 
-- Dashboard membaca data pipeline dari `data/<sim_output_subdir>`.
+- Dashboard membaca data pipeline dari `data/<sim_output_subdir>` (path `storage.data_dir` di config di-resolve ke absolut terhadap project root, sehingga dashboard dan pipeline memakai direktori yang sama).
+- Pastikan dashboard dan pipeline dijalankan dengan config yang sama (mis. sama-sama `app.dev.yaml`) agar Camera Health dan state tampil benar.
 - Jika pipeline belum jalan, dashboard tetap bisa terbuka tetapi data kosong/offline.
-- Runtime control disimpan di `data/<sim_output_subdir>/runtime_control.json`.
