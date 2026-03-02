@@ -47,21 +47,7 @@
         <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 mb-6">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
-                    <span class="text-sm font-semibold text-gray-800">Pipeline</span>
-                    <span class="px-2 py-0.5 rounded text-xs font-medium"
-                          :class="pipelineStatus.running ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'"
-                          x-text="pipelineStatus.running ? 'RUNNING' : 'STOPPED'"></span>
-                    <span class="text-xs text-gray-500" x-text="pipelineStatus.pid ? ('PID ' + pipelineStatus.pid) : ''"></span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button @click="startPipeline()"
-                            class="px-3 py-1.5 rounded text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors">
-                        Start
-                    </button>
-                    <button @click="stopPipeline()"
-                            class="px-3 py-1.5 rounded text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors">
-                        Stop
-                    </button>
+                    <span class="text-sm font-semibold text-gray-800">Runtime Tuning</span>
                 </div>
             </div>
             <div class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -310,7 +296,6 @@
                 lastUpdate: '-',
                 showCameras: false,
                 cameraModal: { open: false, cam: null },
-                pipelineStatus: { running: false, pid: null, config_path: '' },
                 runtimeControl: {
                     frame_skip: 0,
                     min_consecutive_hits: 1,
@@ -322,10 +307,8 @@
                 init() {
                     this.fetchData();
                     this.fetchCameras();
-                    this.fetchPipelineStatus();
                     this.fetchRuntimeControl();
                     setInterval(() => this.fetchData(), 2000);
-                    setInterval(() => this.fetchPipelineStatus(), 3000);
                 },
 
                 async fetchData() {
@@ -358,37 +341,6 @@
                         }
                     } catch (e) {
                         console.error('Camera fetch error', e);
-                    }
-                },
-
-                async fetchPipelineStatus() {
-                    try {
-                        const res = await fetch('/api/pipeline/status');
-                        this.pipelineStatus = await res.json();
-                    } catch (e) {
-                        console.error('Pipeline status fetch error', e);
-                    }
-                },
-
-                async startPipeline() {
-                    try {
-                        await fetch('/api/pipeline/start', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({})
-                        });
-                        await this.fetchPipelineStatus();
-                    } catch (e) {
-                        console.error('Start pipeline error', e);
-                    }
-                },
-
-                async stopPipeline() {
-                    try {
-                        await fetch('/api/pipeline/stop', { method: 'POST' });
-                        await this.fetchPipelineStatus();
-                    } catch (e) {
-                        console.error('Stop pipeline error', e);
                     }
                 },
 
