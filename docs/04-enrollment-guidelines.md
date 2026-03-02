@@ -1,42 +1,61 @@
 # Enrollment Guidelines
 
-Kualitas enrollment sangat mempengaruhi akurasi recognition.
+Akurasi recognition sangat tergantung kualitas data enrollment.
 
-## 1. Target Minimum
+## 1. Metode Enrollment yang Didukung
+
+- Dashboard `/manage`
+  - upload foto (1-5 gambar)
+  - capture webcam (1-5 gambar)
+- CLI webcam:
+  - `python -m src.app enroll --spg_id <id> --name "<nama>" --samples <n>`
+
+## 2. Rekomendasi Data Minimal
 
 Per SPG:
 
-- 3 sampai 5 foto berkualitas baik (minimum untuk dashboard upload)
-- wajah jelas, fokus, dan tidak blur
-- variasi pose ringan (depan, serong kiri, serong kanan)
+- minimal 3 foto, ideal 5 foto
+- variasi pose ringan (depan, serong kiri/kanan)
+- pencahayaan cukup dan fokus baik
 
-## 2. Recommended Method
+## 3. Aturan Kualitas
 
-Gunakan dashboard `/manage`:
+- wajah jelas, tidak blur
+- hindari resolusi terlalu kecil
+- hindari kompresi berlebih dari aplikasi chat
+- hindari occlusion berat (masker hitam/kacamata gelap), kecuali memang kondisi operasional harian
 
-1. isi `SPG ID` dan `Nama`
-2. upload 1 sampai 5 foto
-3. submit enrollment
+## 4. Validasi Teknis yang Berlaku
 
-## 3. Capture Quality Rules
+Saat enroll, sistem menolak sampel jika:
 
-- pencahayaan cukup
-- wajah tidak tertutup masker/kacamata hitam (kecuali memang skenario operasional)
-- hindari foto kompresi berat dari chat app
-- hindari foto jarak jauh dari CCTV
+- confidence deteksi terlalu rendah
+- wajah terlalu kecil
+- embedding tidak terbentuk
 
-## 4. Re-enrollment Triggers
+Jika semua foto gagal validasi, endpoint enrollment akan mengembalikan error.
 
-Lakukan re-enroll jika:
+## 5. Re-enrollment Trigger
 
-- performa recognition turun konsisten
-- perubahan tampilan signifikan
-- perubahan kondisi lighting outlet
+Lakukan enrollment ulang jika:
 
-## 5. Data Policy
+- false-negative meningkat konsisten
+- perubahan tampilan signifikan (rambut, atribut)
+- perubahan lighting outlet signifikan
 
-- simpan hanya data yang diperlukan:
-  - embedding
-  - metadata identitas
-  - last face crop
-- jangan menyimpan data wajah mentah berlebihan tanpa kebutuhan operasional.
+## 6. Data yang Disimpan
+
+Per SPG:
+
+- file JSON berisi embedding + metadata
+- last face crop (`*_last_face.jpg`)
+
+Lokasi:
+
+- `<storage.data_dir>/<storage.gallery_subdir>/`
+
+## 7. Praktik Operasional
+
+- gunakan ID SPG konsisten (tidak ganti-ganti format)
+- hindari duplikasi ID untuk orang berbeda
+- jika personel resign/pindah, hapus dari gallery agar tidak ikut deteksi target

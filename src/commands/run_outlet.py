@@ -200,7 +200,8 @@ def worker_camera_capture(
             if frame is not None:
                 frame_id += 1
                 raw_frame = frame.copy() if save_raw_preview else None
-                
+                capture_ts = now
+                 
                 try:
                     if shm_buf:
                         inf_frame = frame
@@ -210,9 +211,10 @@ def worker_camera_capture(
                         if h > shm_max_h or w > shm_max_w:
                             bbox_scale = min(shm_max_h / h, shm_max_w / w)
                             inf_frame = cv2.resize(inf_frame, (int(w * bbox_scale), int(h * bbox_scale)))
-                        
+                         
                         shm_buf.write(inf_frame, frame_id, now)
-                        input_queue.put((camera_id, frame_id, now), timeout=0.1)
+                        enqueue_ts = time.time()
+                        input_queue.put((camera_id, frame_id, capture_ts, enqueue_ts), timeout=0.1)
                     else:
                         inf_frame = frame
                         h, w = inf_frame.shape[:2]
@@ -223,8 +225,9 @@ def worker_camera_capture(
                         if h > QUEUE_MAX_H or w > QUEUE_MAX_W:
                             bbox_scale = min(QUEUE_MAX_H / h, QUEUE_MAX_W / w)
                             inf_frame = cv2.resize(inf_frame, (int(w * bbox_scale), int(h * bbox_scale)))
-                            
-                        input_queue.put((camera_id, frame_id, inf_frame, now), timeout=0.1)
+                             
+                        enqueue_ts = time.time()
+                        input_queue.put((camera_id, frame_id, inf_frame, capture_ts, enqueue_ts), timeout=0.1)
                 except queue.Full:
                     pass
                 except Exception:
@@ -303,6 +306,9 @@ def run_outlet(
     outlet = settings.outlet
     outlet_id = outlet.id
     target_spg_ids = outlet.target_spg_ids
+    target_spg_set = set(target_spg_ids)
+    min_hits_base = max(1, int(settings.recognition.min_consecutive_hits))
+    configured_roi_by_camera = {cam.id: cam.roi for cam in outlet.cameras}
     
     logger.info(f"=== Outlet Started: {outlet_id} (Centralized Mode) ===")
     
@@ -334,6 +340,9 @@ def run_outlet(
         logger.error("No valid cameras.")
         sys.exit(1)
 
+    roi_by_camera = {cam_id: configured_roi_by_camera.get(cam_id) for cam_id, _ in camera_sources}
+    roi_enabled_cameras = [cam_id for cam_id, roi in roi_by_camera.items() if roi is not None]
+
     # Directories
     base_data_dir = os.path.join(settings.storage.data_dir, settings.storage.sim_output_subdir)
     os.makedirs(base_data_dir, exist_ok=True)
@@ -342,7 +351,11 @@ def run_outlet(
     if os.path.exists(old_state): os.remove(old_state)
     
     try:
-        SnapshotCleaner(settings.storage.data_dir, settings.storage.snapshot_retention_days).clean()
+        SnapshotCleaner(
+            settings.storage.data_dir,
+            settings.storage.snapshot_retention_days,
+            sim_output_subdir=settings.storage.sim_output_subdir,
+        ).clean()
     except Exception:
         pass
 
@@ -359,6 +372,11 @@ def run_outlet(
     max_w = settings.inference.max_frame_width
     frame_skip_base = max(0, int(settings.inference.frame_skip))
     frame_skip_control = multiprocessing.Value("i", frame_skip_base)
+    min_det_score_base = max(0.0, float(settings.recognition.min_det_score))
+    min_det_score_control = multiprocessing.Value("d", min_det_score_base)
+    min_face_width_base = max(0, int(settings.recognition.min_face_width_px))
+    min_face_width_control = multiprocessing.Value("i", min_face_width_base)
+    min_hits_control = multiprocessing.Value("i", min_hits_base)
     
     shared_buffers = {}
     shared_locks = {}
@@ -386,7 +404,22 @@ def run_outlet(
         shared_buffer_configs.clear()
         logger.info("[SharedMem] Disabled, using queue mode.")
 
+    # Runtime control file (optional hot-tuning from dashboard)
+    control_path = os.path.join(base_data_dir, "runtime_control.json")
+    control_last_mtime = 0.0
+
     logger.info(f"[Config] base_frame_skip={frame_skip_base}")
+    logger.info(
+        "[Config] min_consecutive_hits=%s, min_det_score=%.2f, min_face_width_px=%s",
+        min_hits_base,
+        min_det_score_base,
+        min_face_width_base,
+    )
+    logger.info(
+        "[Config] ROI cameras: %s",
+        ", ".join(roi_enabled_cameras) if roi_enabled_cameras else "none (full frame)",
+    )
+    logger.info("[Config] runtime_control_file=%s", control_path)
 
     # Supervisor and adaptive runtime controls
     restart_cooldown_sec = max(0.5, float(settings.runtime.supervisor_restart_cooldown_sec))
@@ -401,6 +434,67 @@ def run_outlet(
     if auto_degrade_lag_low_ms >= auto_degrade_lag_high_ms:
         auto_degrade_lag_low_ms = max(0.0, auto_degrade_lag_high_ms * 0.6)
 
+    def _apply_runtime_control() -> None:
+        nonlocal control_last_mtime
+        nonlocal auto_degrade_enabled
+
+        if not os.path.exists(control_path):
+            return
+        try:
+            mtime = os.path.getmtime(control_path)
+        except OSError:
+            return
+        if mtime <= control_last_mtime:
+            return
+
+        try:
+            with open(control_path, "r", encoding="utf-8") as f:
+                payload = json.load(f) or {}
+        except Exception as e:
+            logger.warning(f"[RuntimeControl] Failed reading control file: {e}")
+            control_last_mtime = mtime
+            return
+
+        if not isinstance(payload, dict):
+            control_last_mtime = mtime
+            return
+
+        changed = []
+        if "frame_skip" in payload:
+            try:
+                frame_skip_control.value = max(0, int(payload["frame_skip"]))
+                changed.append(f"frame_skip={int(frame_skip_control.value)}")
+            except Exception:
+                pass
+        if "min_consecutive_hits" in payload:
+            try:
+                min_hits_control.value = max(1, int(payload["min_consecutive_hits"]))
+                changed.append(f"min_consecutive_hits={int(min_hits_control.value)}")
+            except Exception:
+                pass
+        if "min_det_score" in payload:
+            try:
+                min_det_score_control.value = max(0.0, float(payload["min_det_score"]))
+                changed.append(f"min_det_score={float(min_det_score_control.value):.2f}")
+            except Exception:
+                pass
+        if "min_face_width_px" in payload:
+            try:
+                min_face_width_control.value = max(0, int(payload["min_face_width_px"]))
+                changed.append(f"min_face_width_px={int(min_face_width_control.value)}")
+            except Exception:
+                pass
+        if "auto_degrade_enabled" in payload:
+            try:
+                auto_degrade_enabled = bool(payload["auto_degrade_enabled"])
+                changed.append(f"auto_degrade_enabled={auto_degrade_enabled}")
+            except Exception:
+                pass
+
+        control_last_mtime = mtime
+        if changed:
+            logger.info("[RuntimeControl] Applied: %s", ", ".join(changed))
+
     # Start / restart helpers
     def _spawn_inference() -> multiprocessing.Process:
         server = InferenceServer(
@@ -411,9 +505,15 @@ def run_outlet(
             det_size=tuple(settings.recognition.det_size),
             threshold=settings.recognition.threshold,
             gallery_path=settings.storage.data_dir,
+            gallery_subdir=settings.storage.gallery_subdir,
             shared_buffers=shared_buffer_configs if use_shm else None,
             frame_skip=frame_skip_base,
             frame_skip_value=frame_skip_control,
+            min_det_score=min_det_score_base,
+            min_face_width_px=min_face_width_base,
+            min_det_score_value=min_det_score_control,
+            min_face_width_px_value=min_face_width_control,
+            roi_by_camera=roi_by_camera,
         )
         proc = multiprocessing.Process(target=server.run, name="inference_server")
         proc.daemon = True
@@ -493,6 +593,9 @@ def run_outlet(
             "last_event_ts": 0.0,
             "inference_time_ema_ms": None,
             "queue_lag_ema_ms": None,
+            "capture_to_inference_ema_ms": None,
+            "input_queue_wait_ema_ms": None,
+            "post_inference_queue_ema_ms": None,
         }
         for cam_id, src in camera_sources
     }
@@ -502,6 +605,7 @@ def run_outlet(
     worker_restart_exhausted: set[str] = set()
     inference_restart_history: deque[float] = deque()
     inference_last_restart_ts = 0.0
+    hit_streaks_by_camera: dict[str, dict[str, int]] = {cam_id: {} for cam_id, _ in camera_sources}
 
     high_lag_streak = 0
     low_lag_streak = 0
@@ -544,6 +648,7 @@ def run_outlet(
     try:
         while True:
             loop_now = time.time()
+            _apply_runtime_control()
 
             # Inference process
             if not p_server.is_alive():
@@ -606,6 +711,31 @@ def run_outlet(
                         lag_ms = max(0.0, (now_ts - result_ts) * 1000.0)
                         prev_lag = metrics["queue_lag_ema_ms"]
                         metrics["queue_lag_ema_ms"] = lag_ms if prev_lag is None else (0.2 * lag_ms + 0.8 * prev_lag)
+
+                        cap_to_inf_ms = float(res.get("capture_to_inference_ms", lag_ms))
+                        prev_cap_inf = metrics["capture_to_inference_ema_ms"]
+                        metrics["capture_to_inference_ema_ms"] = (
+                            cap_to_inf_ms
+                            if prev_cap_inf is None
+                            else (0.2 * cap_to_inf_ms + 0.8 * prev_cap_inf)
+                        )
+
+                        in_q_wait_ms = float(res.get("input_queue_wait_ms", 0.0))
+                        prev_in_q = metrics["input_queue_wait_ema_ms"]
+                        metrics["input_queue_wait_ema_ms"] = (
+                            in_q_wait_ms
+                            if prev_in_q is None
+                            else (0.2 * in_q_wait_ms + 0.8 * prev_in_q)
+                        )
+
+                        inf_done_ts = float(res.get("inference_done_ts", now_ts))
+                        post_inf_q_ms = max(0.0, (now_ts - inf_done_ts) * 1000.0)
+                        prev_post_q = metrics["post_inference_queue_ema_ms"]
+                        metrics["post_inference_queue_ema_ms"] = (
+                            post_inf_q_ms
+                            if prev_post_q is None
+                            else (0.2 * post_inf_q_ms + 0.8 * prev_post_q)
+                        )
                     
                     if cid in worker_feedback_queues:
                         try:
@@ -613,24 +743,48 @@ def run_outlet(
                         except queue.Full:
                             pass
 
+                    candidates_by_spg: dict[str, dict] = {}
                     for f in res['faces']:
-                        if f['matched'] and f['spg_id'] in target_spg_ids:
-                            ev = Event(
-                                event_type="SPG_SEEN",
-                                outlet_id=outlet_id,
-                                camera_id=cid,
-                                spg_id=f['spg_id'],
-                                name=f['name'],
-                                similarity=f['similarity'],
-                                ts=res['timestamp'],
-                                details={"frame_id": res['frame_id']}
-                            )
-                            if cid in event_stores:
-                                event_stores[cid].append(ev)
-                            events_batch.append(ev)
-                            if metrics is not None:
-                                metrics["events_count"] += 1
-                                metrics["last_event_ts"] = float(res.get("timestamp", now_ts))
+                        if not f.get("matched"):
+                            continue
+                        spg_id = f.get("spg_id")
+                        if spg_id not in target_spg_set:
+                            continue
+
+                        prev = candidates_by_spg.get(spg_id)
+                        if prev is None or float(f.get("similarity", 0.0)) > float(prev.get("similarity", 0.0)):
+                            candidates_by_spg[spg_id] = f
+
+                    streaks = hit_streaks_by_camera.setdefault(cid, {})
+                    seen_spg_ids = set(candidates_by_spg.keys())
+
+                    for spg_id, f in candidates_by_spg.items():
+                        streak_now = streaks.get(spg_id, 0) + 1
+                        streaks[spg_id] = streak_now
+                        current_min_hits = max(1, int(min_hits_control.value))
+                        if streak_now < current_min_hits:
+                            continue
+
+                        ev = Event(
+                            event_type="SPG_SEEN",
+                            outlet_id=outlet_id,
+                            camera_id=cid,
+                            spg_id=spg_id,
+                            name=f.get("name"),
+                            similarity=float(f.get("similarity", 0.0)),
+                            ts=res['timestamp'],
+                            details={"frame_id": res['frame_id'], "consecutive_hits": streak_now},
+                        )
+                        if cid in event_stores:
+                            event_stores[cid].append(ev)
+                        events_batch.append(ev)
+                        if metrics is not None:
+                            metrics["events_count"] += 1
+                            metrics["last_event_ts"] = float(res.get("timestamp", now_ts))
+
+                    for spg_id in list(streaks.keys()):
+                        if spg_id not in seen_spg_ids:
+                            streaks.pop(spg_id, None)
 
                 except queue.Empty:
                     break
@@ -723,7 +877,11 @@ def run_outlet(
                 "outlet_id": outlet_id,
                 "frame_skip": int(frame_skip_control.value),
                 "base_frame_skip": int(frame_skip_base),
+                "min_consecutive_hits": int(min_hits_control.value),
+                "min_det_score": round(float(min_det_score_control.value), 4),
+                "min_face_width_px": int(min_face_width_control.value),
                 "auto_degrade_enabled": auto_degrade_enabled,
+                "runtime_control_path": control_path,
                 "supervisor": {
                     "inference_alive": p_server.is_alive(),
                     "inference_restarts_last_minute": len(inference_restart_history),
@@ -770,6 +928,9 @@ def run_outlet(
                         "processed_fps": round(processed_fps, 2),
                         "inference_time_ms": round(float(m.get("inference_time_ema_ms") or 0.0), 1),
                         "queue_lag_ms": round(float(m.get("queue_lag_ema_ms") or 0.0), 1),
+                        "capture_to_inference_ms": round(float(m.get("capture_to_inference_ema_ms") or 0.0), 1),
+                        "input_queue_wait_ms": round(float(m.get("input_queue_wait_ema_ms") or 0.0), 1),
+                        "post_inference_queue_ms": round(float(m.get("post_inference_queue_ema_ms") or 0.0), 1),
                         "last_result_age_sec": None if result_age_sec is None else round(result_age_sec, 2),
                         "last_frame_id": int(m.get("last_frame_id") or 0),
                         "events_count": int(m.get("events_count") or 0),

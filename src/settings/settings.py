@@ -20,6 +20,8 @@ class CameraConfig(BaseModel):
 class RecognitionConfig(BaseModel):
     threshold: float
     min_consecutive_hits: int
+    min_det_score: float = 0.55
+    min_face_width_px: int = 80
     model_name: str = "buffalo_s"
     execution_providers: list[str] = Field(
         default_factory=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -51,6 +53,7 @@ class TargetConfig(BaseModel):
 class CameraEntry(BaseModel):
     id: str
     rtsp_url: str
+    roi: tuple[float, float, float, float] | None = None
 
 
 class OutletConfig(BaseModel):

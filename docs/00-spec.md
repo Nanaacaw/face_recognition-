@@ -1,60 +1,90 @@
 # System Spec
 
-## 1. Purpose
+## 1. Tujuan
 
-Sistem memonitor kehadiran SPG berdasarkan face recognition dari kamera.
-Jika SPG target tidak terlihat melebihi `presence.absent_seconds`, sistem mengirim alert Telegram dan menyimpan evidence.
+Memonitor kehadiran SPG secara realtime berbasis face recognition pada level outlet (multi-kamera), dan mengirim notifikasi ketika SPG tidak terlihat melewati ambang waktu.
 
-## 2. Scope
+## 2. Ruang Lingkup
 
-- Input source: webcam, RTSP, atau file video (simulation).
-- Multi-camera outlet dengan aturan presence level outlet (ANY-of-N).
-- Dashboard realtime untuk status, event, health kamera, dan stream AI view.
+- Input video: RTSP, webcam, atau file video simulasi
+- Multi-camera outlet dengan **centralized inference**
+- Dashboard lokal untuk status SPG, event, health, dan live feed
+- Enrollment SPG via dashboard (`/manage`) atau CLI
+- Notifikasi Telegram untuk kondisi absence
+- Self-healing untuk worker/inference process
 
-## 3. Inputs
+## 3. Mode Operasi
 
-- Kamera:
-  - `camera.source=webcam` + `camera.webcam_index`
-  - `camera.source=rtsp` + `camera.rtsp_url`
-  - `outlet.cameras[].rtsp_url` untuk mode multi-camera
-- Gallery SPG: JSON embedding + photo di `data/gallery`.
-- Runtime config dari YAML + env variables.
+### Multi-camera outlet (utama)
 
-## 4. Outputs
+- Command: `python -m src.commands.run_outlet --config <yaml>`
+- Entry dari Makefile: `run-demo`, `run-staging`, `run-prod`
 
-- Event JSONL per kamera (`events.jsonl`).
-- State outlet (`outlet_state.json`).
-- Health telemetry (`camera_health.json`).
-- Snapshot preview stream (`latest_frame.jpg`).
-- Alert Telegram (opsional jika enabled).
+### Single-camera (tooling)
 
-## 5. Presence Rules
+- Command: `python -m src.app run` (webcam/rtsp single stream)
+- Umumnya dipakai untuk debug cepat, bukan mode produksi outlet
 
-- SPG dianggap `PRESENT` jika ada hit valid dari salah satu kamera.
-- SPG dianggap `ABSENT` jika tidak ada hit valid lebih lama dari `presence.absent_seconds`.
-- Alert absence anti-spam: satu kali per periode absence, reset saat SPG terlihat lagi.
+### Dashboard
 
-## 6. Reliability Requirements
+- Command: `python -m src.commands.run_dashboard --config <yaml>`
+- UI:
+  - `/` monitoring
+  - `/manage` enrollment dan manajemen gallery
 
-- Worker kamera dan inference process harus self-healing (auto restart).
-- RTSP reconnect memakai backoff + jitter saat jaringan/kamera bermasalah.
-- Saat overload, sistem boleh degrade otomatis via `frame_skip` untuk menjaga pipeline tetap hidup.
-- Dashboard stream harus tetap stabil saat ada transient file read/write error.
+## 4. Arsitektur Runtime
 
-## 7. Security Requirements
+1. Camera worker per kamera membaca frame.
+2. Worker menulis frame ke shared memory (atau queue fallback) + metadata.
+3. Inference server tunggal menjalankan detector + matcher.
+4. Main loop:
+   - routing result ke worker (overlay)
+   - aggregate event outlet
+   - evaluasi absence
+   - tulis `outlet_state.json` + `camera_health.json`
+   - kirim alert Telegram jika perlu
 
-- RTSP credential wajib lewat env var, bukan hardcoded.
-- Contoh placeholder di config: `${RTSP_CAM_01_URL}`.
-- Secret Telegram tetap di `.env`.
+## 5. Aturan Presence
 
-## 8. Non-Goals
+- `PRESENT`: SPG terdeteksi pada salah satu kamera.
+- `ABSENT`: SPG pernah terlihat tetapi tidak terdeteksi lagi > `presence.absent_seconds`.
+- `NEVER_ARRIVED`: SPG belum pernah terdeteksi sejak startup hingga melewati `presence.absent_seconds`.
+- Alert `ABSENT_ALERT_FIRED` dikirim 1x per periode absence, reset saat SPG terlihat kembali.
 
-- Tidak menargetkan true live ultra-low latency (WebRTC) di versi ini.
-- Tidak menyimpan video full recording sebagai fitur utama.
+## 6. Output Sistem
 
-## 9. Success Criteria
+Basis `storage.data_dir`:
 
-- Pipeline tetap berjalan walau satu kamera drop.
-- Inference process bisa restart otomatis jika crash.
-- Dashboard tetap menampilkan stream AI tanpa blank berkepanjangan.
-- Alert absence terkirim konsisten saat kondisi terpenuhi.
+- `<sim_output_subdir>/outlet_state.json`
+- `<sim_output_subdir>/camera_health.json`
+- `<sim_output_subdir>/cam_XX/events.jsonl`
+- `<sim_output_subdir>/cam_XX/snapshots/latest_frame.jpg`
+- `<gallery_subdir>/*.json` + `*_last_face.jpg`
+- `snapshots/*.jpg` (snapshot alert)
+
+## 7. Runtime Control
+
+File opsional:
+
+- `<data_dir>/<sim_output_subdir>/runtime_control.json`
+
+Field support:
+
+- `frame_skip`
+- `min_consecutive_hits`
+- `min_det_score`
+- `min_face_width_px`
+- `auto_degrade_enabled`
+
+## 8. Security
+
+- RTSP URL dan Telegram credential dari environment (`.env`)
+- Config YAML boleh berisi placeholder `${ENV_VAR}`
+- Pipeline fail-fast jika mode RTSP aktif tapi env URL belum terisi
+
+## 9. Kriteria Operasional
+
+- Pipeline stabil berjalan panjang (self-healing aktif)
+- Dashboard menampilkan state/health near-realtime
+- Alert absence tidak spam
+- Resource terkendali via `frame_skip` + auto-degrade

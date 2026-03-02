@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
+from pydantic import Field
 from typing import Any, Literal, Optional
 
 
@@ -24,4 +25,4 @@ class Event(BaseModel):
     name: Optional[str] = None
     similarity: Optional[float] = None
 
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)

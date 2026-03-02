@@ -7,6 +7,8 @@ camera:
 recognition:
   threshold: 0.45
   min_consecutive_hits: 2
+  min_det_score: 0.55
+  min_face_width_px: 70
   model_name: "buffalo_s"
   execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
   det_size: [640, 640]
@@ -26,6 +28,24 @@ target:
   spg_ids: ["001"]
   outlet_id: "OUTLET_DEV"
   camera_id: "CAM_DEV_01"
+
+outlet:
+  id: "OUTLET_PROD"
+  name: "Outlet Production"
+  cameras:
+    - id: "cam_01"
+      rtsp_url: "${RTSP_CAM_01_URL}"
+      roi: null
+    - id: "cam_02"
+      rtsp_url: "${RTSP_CAM_02_URL}"
+      roi: null
+    - id: "cam_03"
+      rtsp_url: "${RTSP_CAM_03_URL}"
+      roi: null
+    - id: "cam_04"
+      rtsp_url: "${RTSP_CAM_04_URL}"
+      roi: null
+  target_spg_ids: ["001"]
 
 inference:
   frame_skip: 1

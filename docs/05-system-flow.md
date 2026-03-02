@@ -1,132 +1,136 @@
-# System Flow and Runtime Architecture
+# System Flow
 
-Dokumen ini menjelaskan alur runtime aktual pada mode multi-camera centralized.
+Dokumen ini menjelaskan alur runtime aktual mode outlet multi-camera.
 
-## 1. Operation Modes
+## 1. Diagram Alur
 
-### Single camera
+```mermaid
+graph TD
+    Cam1[Camera Worker 1] --> InQ[input_queue]
+    Cam2[Camera Worker 2] --> InQ
+    CamN[Camera Worker N] --> InQ
 
-- Command: `python -m src.app run`
-- Flow: capture -> inference -> presence -> alert dalam satu proses.
+    SHM[(Shared Memory Buffers)] -. frame data .-> INF[Inference Server]
+    InQ --> INF
+    INF --> OutQ[output_queue]
+    OutQ --> MAIN[Main Loop / Supervisor]
 
-### Multi-camera centralized
+    MAIN --> AGG[Outlet Aggregator]
+    MAIN --> EV[events.jsonl per camera]
+    MAIN --> STATE[outlet_state.json]
+    MAIN --> HEALTH[camera_health.json]
+    MAIN --> SNAP[snapshots]
+    MAIN --> TG[Telegram Notifier]
 
-- Command:
-  - `python -m src.commands.run_outlet --config <yaml>`
-  - atau quick switch `make run-demo|run-staging|run-prod`
-- Flow:
-  - N camera workers
-  - 1 inference server
-  - 1 main process (router + aggregator + supervisor)
+    STATE --> DASH[Dashboard]
+    HEALTH --> DASH
+    EV --> DASH
+    SNAP --> DASH
+```
 
-## 2. Main Pipeline
+## 2. Startup Sequence (`run_outlet`)
 
-1. Worker membaca frame dari RTSP/webcam/file.
-2. Worker throttle berdasarkan `camera.process_fps`.
-3. Worker kirim metadata/frame ke inference:
-   - shared memory mode (utama)
-   - queue fallback mode
-4. Inference server:
-   - baca item queue
-   - apply `frame_skip` (dinamis)
-   - detect + match
-   - kirim hasil ke output queue
-5. Main process:
-   - route feedback ke worker
-   - generate event `SPG_SEEN`
-   - ingest ke `OutletAggregator`
-   - tick absence logic + alert
-   - dump state dan health JSON
+1. Load config dan validasi `outlet`.
+2. Tentukan source kamera:
+   - RTSP outlet (normal)
+   - video files (simulate mode)
+3. Setup direktori output.
+4. Jalankan snapshot cleaner.
+5. Inisialisasi queue + shared memory buffers.
+6. Spawn inference process.
+7. Spawn worker process per kamera.
+8. Masuk loop utama supervisor + aggregator.
 
-## 3. Self-Healing Supervisor
+## 3. Worker Flow
 
-Main loop memonitor process:
+1. Capture frame dari source.
+2. Throttle sesuai `camera.process_fps`.
+3. Kirim metadata ke `input_queue`.
+4. Tulis frame ke shared memory (atau queue fallback).
+5. Terima feedback faces dari inference untuk overlay.
+6. Simpan `latest_frame.jpg` (dan opsional `latest_raw_frame.jpg`).
 
-- inference process
-- worker per kamera
+## 4. Inference Flow
 
-Jika mati:
+1. Load model detector.
+2. Load gallery embeddings.
+3. Ambil item dari queue.
+4. Resolve frame (shared memory/queue payload).
+5. Apply runtime gate:
+   - frame skip
+   - ROI
+   - min detection score
+   - minimum face width
+6. Match embedding ke gallery.
+7. Push result ke output queue.
 
-- restart dengan cooldown `runtime.supervisor_restart_cooldown_sec`
-- restart dibatasi `runtime.supervisor_max_restarts_per_minute`
-- jika budget habis, worker/inference ditandai exhausted
+## 5. Main Loop Flow
 
-## 4. Adaptive Degrade
+1. Pantau process hidup/mati.
+2. Restart sesuai cooldown + budget.
+3. Drain output queue (batch).
+4. Bangun event `SPG_SEEN` setelah streak `min_consecutive_hits`.
+5. Ingest event ke `OutletAggregator`.
+6. Jalankan `tick()` aggregator untuk absence alert.
+7. Kirim Telegram (message + snapshot) jika alert terjadi.
+8. Hitung health metrics dan tulis JSON.
+9. Dump state outlet.
 
-Saat load tinggi (lag naik), main loop otomatis naikkan `frame_skip`.
-Saat stabil kembali, `frame_skip` diturunkan.
+## 6. Presence State Machine (Aggregator)
 
-Kontrol:
+Per target SPG:
 
-- `runtime.auto_degrade_enabled`
-- `runtime.auto_degrade_lag_high_ms`
-- `runtime.auto_degrade_lag_low_ms`
-- `runtime.auto_degrade_high_streak`
-- `runtime.auto_degrade_low_streak`
-- `runtime.auto_degrade_max_frame_skip`
+- `NOT_SEEN_YET` -> `PRESENT` saat pertama kali terlihat
+- `NOT_SEEN_YET` -> `NEVER_ARRIVED` jika lewat `absent_seconds` tanpa detections
+- `PRESENT` -> `ABSENT` jika tidak terlihat > `absent_seconds`
+- `ABSENT` -> `PRESENT` saat terlihat lagi
 
-## 5. RTSP Failure Handling
+Alert absence 1x per periode absence (anti-spam).
 
-`RTSPReader` memakai:
-
-- reconnect exponential backoff
-- jitter
-- retry schedule non-blocking
-
-Tujuan: mencegah reconnect storm saat jaringan tidak normal.
-
-## 6. Dashboard Data Flow
-
-Pipeline menghasilkan:
-
-- `outlet_state.json`
-- `camera_health.json`
-- `cam_x/events.jsonl`
-- `cam_x/snapshots/latest_frame.jpg`
-
-Dashboard FastAPI membaca data ini lewat:
-
-- `GET /api/state`
-- `GET /api/events`
-- `GET /api/health`
-- `GET /stream/{cam_id}`
-
-## 7. Stream Stability Notes
-
-- Worker menulis preview JPEG secara atomic.
-- Stream endpoint validasi basic JPEG boundary.
-- Jika frame baru tidak valid, endpoint pakai last-good-frame.
-
-## 8. Health Metrics
-
-Per kamera:
-
-- `status` (`LIVE`, `STALE`, `OFFLINE`)
-- `processed_fps`
-- `inference_time_ms`
-- `queue_lag_ms`
-- `last_result_age_sec`
-- `worker_alive`
-- `worker_restarts_last_minute`
-- `restart_exhausted`
+## 7. Health Metrics yang Dihasilkan
 
 Global:
 
 - `frame_skip`
 - `base_frame_skip`
-- status supervisor inference
+- `min_consecutive_hits`
+- `min_det_score`
+- `min_face_width_px`
+- status inference supervisor
 
-## 9. Recommended Runtime Profiles
+Per kamera:
 
-### Demo
+- status `LIVE`/`STALE`/`OFFLINE`
+- processed FPS
+- inference ms
+- queue lag ms
+- capture->inference ms
+- input queue wait ms
+- post-inference queue ms
+- last result age
+- worker restart counters
 
-- smooth UI
-- `process_fps` lebih tinggi
-- base `frame_skip` rendah
+## 8. Runtime Control
 
-### Production
+Main loop membaca:
 
-- hemat resource
-- base `frame_skip` moderat
-- auto-degrade aktif untuk spike handling
-- preview width/quality lebih kecil
+- `<data_dir>/<sim_output_subdir>/runtime_control.json`
+
+Field update realtime:
+
+- `frame_skip`
+- `min_consecutive_hits`
+- `min_det_score`
+- `min_face_width_px`
+- `auto_degrade_enabled`
+
+## 9. Dashboard Read Path
+
+Dashboard membaca:
+
+- `outlet_state.json`
+- `camera_health.json`
+- `cam_*/events.jsonl`
+- `cam_*/snapshots/latest_frame.jpg`
+
+Semua path mengikuti `storage.data_dir`, `storage.sim_output_subdir`, dan `storage.gallery_subdir`.

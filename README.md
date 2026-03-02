@@ -1,13 +1,60 @@
-# face_recognition
+# SPG Attendance Monitoring (Face Recognition)
 
-Sistem monitoring kehadiran SPG berbasis face recognition.
-Pipeline memproses stream kamera, menghasilkan event presence, dan mengirim alert Telegram saat SPG target tidak terlihat melebihi batas waktu.
+Sistem monitoring kehadiran SPG berbasis face recognition untuk mode multi-kamera outlet, dengan dashboard realtime dan notifikasi Telegram.
 
-## Prerequisites
+## Sistem Saat Ini
 
-- Windows
-- Conda
-- Kamera webcam atau RTSP
+- Pipeline utama: **multi-camera centralized inference** (`run_outlet`)
+- Dashboard FastAPI + UI monitoring + halaman **Manage SPG**
+- Dukungan mode:
+  - RTSP production/staging
+  - simulasi video lokal
+  - single webcam (debug/enroll/quick test)
+- Self-healing:
+  - restart worker/inference
+  - restart budget guard
+  - auto-degrade (`frame_skip`) saat lag tinggi
+
+## Arsitektur Ringkas
+
+```text
+Camera Workers (N) -> Inference Server (1) -> Main Loop (Aggregator + Supervisor)
+                                             -> JSON state/health/events + snapshots
+Dashboard (FastAPI) membaca output JSON/JPEG tersebut untuk UI realtime.
+```
+
+## System Flow
+
+```mermaid
+graph TD
+    Cam1[Camera Worker 1] --> InQ[input_queue]
+    Cam2[Camera Worker 2] --> InQ
+    CamN[Camera Worker N] --> InQ
+
+    SHM[(Shared Memory Buffers)] -. frame data .-> INF[Inference Server]
+    InQ --> INF
+    INF --> OutQ[output_queue]
+    OutQ --> MAIN[Main Loop / Supervisor]
+
+    MAIN --> AGG[Outlet Aggregator]
+    MAIN --> STATE[outlet_state.json]
+    MAIN --> HEALTH[camera_health.json]
+    MAIN --> EVENTS[events.jsonl]
+    MAIN --> SNAP[snapshots]
+    MAIN --> TG[Telegram Alert]
+
+    STATE --> DASH[Dashboard]
+    HEALTH --> DASH
+    EVENTS --> DASH
+    SNAP --> DASH
+```
+
+## Prasyarat
+
+- Windows 10/11
+- Python 3.10+ (disarankan via Conda)
+- Kamera RTSP atau webcam
+- GPU NVIDIA (opsional, direkomendasikan untuk model besar)
 
 ## Setup
 
@@ -19,84 +66,111 @@ copy .env.example .env
 
 Isi `.env` minimal:
 
-- `SPG_TELEGRAM_BOT_TOKEN` (opsional jika notifikasi aktif)
-- `SPG_TELEGRAM_CHAT_ID` (opsional jika notifikasi aktif)
-- `RTSP_CAM_01_URL`
-- `RTSP_CAM_02_URL`
-- `RTSP_CAM_03_URL`
-- `RTSP_CAM_04_URL`
+- `RTSP_CAM_01_URL` s.d. `RTSP_CAM_04_URL`
+- `SPG_TELEGRAM_BOT_TOKEN` dan `SPG_TELEGRAM_CHAT_ID` (opsional jika notifikasi aktif)
 
-Config resolution:
+## Menjalankan Sistem
 
-1. `APP_CONFIG_PATH` (jika diisi)
-2. `APP_ENV` -> `configs/app.<env>.yaml`
-3. default `dev`
+### 1) Mode utama (multi-camera)
 
-## Quick Run
-
-Jalankan pipeline dan dashboard di terminal terpisah.
-
-Demo:
+Terminal 1 (pipeline):
 
 ```bash
 make run-demo
+```
+
+Terminal 2 (dashboard):
+
+```bash
 make dashboard-demo
 ```
 
-Staging:
+Dashboard: `http://localhost:8000`
+
+### 2) Profil staging / production
 
 ```bash
 make run-staging
 make dashboard-staging
-```
 
-Production:
-
-```bash
 make run-prod
 make dashboard-prod
 ```
 
-Dashboard default: `http://localhost:8000`
+### 3) Simulasi video
 
-## Main Commands
+```bash
+make simulate
+make simulate-light
+```
 
-| Command | Description |
-|---|---|
-| `make run` | Run multi-camera pipeline with current env config |
-| `make run-demo` | Run pipeline with `configs/app.dev.yaml` |
-| `make run-staging` | Run pipeline with `configs/app.staging.yaml` |
-| `make run-prod` | Run pipeline with `configs/app.prod.yaml` |
-| `make simulate` | Simulation mode with preview window |
-| `make simulate-light` | Simulation mode without preview window |
-| `make dashboard` | Run dashboard with current env config |
-| `make dashboard-demo` | Run dashboard with `configs/app.dev.yaml` |
-| `make dashboard-staging` | Run dashboard with `configs/app.staging.yaml` |
-| `make dashboard-prod` | Run dashboard with `configs/app.prod.yaml` |
-| `make enroll` | Enroll sample SPG via CLI |
-| `make debug` | Preview + face detection debug |
+### 4) Tool single-camera
 
-## Security Notes
+```bash
+make webcam
+python -m src.app debug --config configs/app.dev.yaml
+python -m src.app enroll --spg_id 001 --name "Nana" --samples 30 --config configs/app.dev.yaml
+```
 
-- Jangan hardcode RTSP credential di file YAML.
-- Gunakan placeholder env di config, contoh: `${RTSP_CAM_01_URL}`.
-- Jangan commit `.env` ke repository.
-- Jika credential pernah terlanjur ter-push, lakukan rotate credential kamera.
+## Konfigurasi
 
-## Key Runtime Features
+Prioritas config:
 
-- Centralized inference (1 model process untuk banyak kamera)
-- Worker supervisor restart (self-healing per process)
-- Adaptive auto-degrade (`frame_skip` naik turun otomatis saat lag tinggi)
-- RTSP reconnect exponential backoff + jitter
-- Dashboard MJPEG AI view dengan fallback frame terakhir agar lebih stabil
+1. argumen `--config`
+2. env `APP_CONFIG_PATH`
+3. env `APP_ENV` -> `configs/app.<env>.yaml` (default `dev`)
 
-## Documentation
+File profile:
 
-- `docs/00-spec.md`
-- `docs/01-mvp-checklist.md`
-- `docs/02-architecture.md`
-- `docs/03-config-reference.md`
-- `docs/03-dashboard.md`
-- `docs/04-enrollment-guidelines.md`
-- `docs/05-system-flow.md`
+- `configs/app.dev.yaml`
+- `configs/app.staging.yaml`
+- `configs/app.prod.yaml`
+
+Referensi lengkap: [docs/03-config-reference.md](docs/03-config-reference.md)
+
+## Data Runtime yang Dihasilkan
+
+Basis path: `storage.data_dir`
+
+- `<data_dir>/<sim_output_subdir>/outlet_state.json`
+- `<data_dir>/<sim_output_subdir>/camera_health.json`
+- `<data_dir>/<sim_output_subdir>/cam_XX/events.jsonl`
+- `<data_dir>/<sim_output_subdir>/cam_XX/snapshots/latest_frame.jpg`
+- `<data_dir>/<gallery_subdir>/*.json` dan `*_last_face.jpg`
+- `<data_dir>/snapshots/*.jpg` (snapshot alert Telegram)
+
+## Runtime Control (Hot Tuning)
+
+Pipeline membaca file:
+
+- `<data_dir>/<sim_output_subdir>/runtime_control.json`
+
+Field yang didukung:
+
+- `frame_skip`
+- `min_consecutive_hits`
+- `min_det_score`
+- `min_face_width_px`
+- `auto_degrade_enabled`
+
+Contoh:
+
+```json
+{
+  "frame_skip": 1,
+  "min_consecutive_hits": 2,
+  "min_det_score": 0.55,
+  "min_face_width_px": 80,
+  "auto_degrade_enabled": true
+}
+```
+
+## Dokumentasi
+
+- [docs/00-spec.md](docs/00-spec.md)
+- [docs/01-mvp-checklist.md](docs/01-mvp-checklist.md)
+- [docs/02-architecture.md](docs/02-architecture.md)
+- [docs/03-config-reference.md](docs/03-config-reference.md)
+- [docs/03-dashboard.md](docs/03-dashboard.md)
+- [docs/04-enrollment-guidelines.md](docs/04-enrollment-guidelines.md)
+- [docs/05-system-flow.md](docs/05-system-flow.md)

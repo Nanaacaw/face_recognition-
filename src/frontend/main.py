@@ -3,13 +3,17 @@ import os
 import glob
 import time
 from collections import deque
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
-from src.pipeline.face_detector import FaceDetector
 from src.settings.settings import load_settings
+
+if TYPE_CHECKING:
+    from src.pipeline.face_detector import FaceDetector
 
 SETTINGS = load_settings()
 DATA_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.sim_output_subdir)
@@ -160,6 +164,7 @@ async def api_events():
 async def api_health():
     return get_health()
 
+
 @app.get("/api/snapshot/{spg_id}")
 async def api_snapshot(spg_id: str):
     path = find_spg_snapshot(spg_id)
@@ -248,6 +253,8 @@ _detector_instance: "FaceDetector | None" = None
 def _get_detector():
     global _detector_instance
     if _detector_instance is None:
+        from src.pipeline.face_detector import FaceDetector
+
         _detector_instance = FaceDetector(
             name=SETTINGS.recognition.model_name,
             providers=SETTINGS.recognition.execution_providers,
@@ -266,7 +273,7 @@ async def manage_page(request: Request):
 async def api_gallery_list():
     """List all enrolled SPGs."""
     from src.storage.gallery_store import GalleryStore
-    store = GalleryStore(SETTINGS.storage.data_dir)
+    store = GalleryStore(SETTINGS.storage.data_dir, gallery_subdir=SETTINGS.storage.gallery_subdir)
     gallery = store.load_all()
 
     result = []
@@ -338,7 +345,7 @@ async def api_gallery_enroll(request: Request):
             detector=detector,
         )
 
-        store = GalleryStore(SETTINGS.storage.data_dir)
+        store = GalleryStore(SETTINGS.storage.data_dir, gallery_subdir=SETTINGS.storage.gallery_subdir)
         store.save_person(spg_id, payload)
 
         if face_crop is not None:

@@ -6,8 +6,8 @@ import numpy as np
 
 
 class GalleryStore:
-    def __init__(self, data_dir: str):
-        self.root = Path(data_dir) / "gallery"
+    def __init__(self, data_dir: str, gallery_subdir: str = "gallery"):
+        self.root = Path(data_dir) / gallery_subdir
         self.root.mkdir(parents=True, exist_ok=True)
 
     def save_person(self, spg_id: str, payload: dict[str, Any]) -> Path:

@@ -125,6 +125,9 @@ def main():
             webcam_index=_resolve_webcam_index(cfg.camera.webcam_index),
             process_fps=cfg.camera.process_fps,
             threshold=cfg.recognition.threshold,
+            min_consecutive_hits=cfg.recognition.min_consecutive_hits,
+            min_det_score=cfg.recognition.min_det_score,
+            min_face_width_px=cfg.recognition.min_face_width_px,
             grace_seconds=cfg.presence.grace_seconds,
             absent_seconds=cfg.presence.absent_seconds,
             outlet_id=cfg.target.outlet_id,
@@ -146,6 +149,7 @@ def main():
             preview_frame_save_interval_sec=cfg.runtime.preview_frame_save_interval_sec,
             preview_frame_width=cfg.runtime.preview_frame_width,
             preview_jpeg_quality=cfg.runtime.preview_jpeg_quality,
+            gallery_subdir=cfg.storage.gallery_subdir,
         )
         return
 
@@ -165,6 +169,7 @@ def main():
             webcam_index=_resolve_webcam_index(cfg.camera.webcam_index),
             process_fps=cfg.camera.process_fps,
             samples=args.samples,
+            gallery_subdir=cfg.storage.gallery_subdir,
             model_name=cfg.recognition.model_name,
             execution_providers=cfg.recognition.execution_providers,
             det_size=cfg.recognition.det_size,

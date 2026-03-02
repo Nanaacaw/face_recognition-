@@ -13,6 +13,7 @@ def enroll_from_webcam(
     webcam_index: int,
     process_fps: int,
     samples: int = 30,
+    gallery_subdir: str = "gallery",
     min_det_score: float = 0.60,
     min_face_width_px: int = 100,
     model_name: str = "buffalo_s",
@@ -25,7 +26,7 @@ def enroll_from_webcam(
         providers=execution_providers,
         det_size=det_size
     )
-    store = GalleryStore(data_dir)
+    store = GalleryStore(data_dir, gallery_subdir=gallery_subdir)
 
     detector.start()
     reader.start()

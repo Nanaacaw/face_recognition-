@@ -12,7 +12,7 @@ def enroll_from_photos(
     detector: FaceDetector,
     min_det_score: float = 0.60,
     min_face_width_px: int = 80,
-) -> dict:
+) -> tuple[dict, np.ndarray | None]:
     """
     Extract face embeddings from a list of images.
 
@@ -25,7 +25,7 @@ def enroll_from_photos(
         min_face_width_px: Minimum face width in pixels
 
     Returns:
-        dict with keys: spg_id, name, embeddings, meta, last_face_crop (np.ndarray | None)
+        Tuple[payload, last_face_crop]
 
     Raises:
         ValueError: If no valid faces found in any image
