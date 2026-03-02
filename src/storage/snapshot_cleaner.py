@@ -4,9 +4,10 @@ import time
 from src.settings.logger import logger
 
 class SnapshotCleaner:
-    def __init__(self, data_dir: str, retention_days: int):
+    def __init__(self, data_dir: str, retention_days: int, sim_output_subdir: str = "sim_output"):
         self.data_dir = data_dir
         self.retention_days = retention_days
+        self.sim_output_subdir = sim_output_subdir
         self.retention_seconds = retention_days * 86400
 
     def clean(self):
@@ -33,7 +34,7 @@ class SnapshotCleaner:
         # 2. Check data/snapshots/*.jpg (if any)
         
         search_paths = [
-            os.path.join(self.data_dir, "sim_output", "*", "snapshots", "*.jpg"),
+            os.path.join(self.data_dir, self.sim_output_subdir, "*", "snapshots", "*.jpg"),
             os.path.join(self.data_dir, "snapshots", "*.jpg")
         ]
         

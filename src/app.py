@@ -149,6 +149,7 @@ def main():
             preview_frame_save_interval_sec=cfg.runtime.preview_frame_save_interval_sec,
             preview_frame_width=cfg.runtime.preview_frame_width,
             preview_jpeg_quality=cfg.runtime.preview_jpeg_quality,
+            gallery_subdir=cfg.storage.gallery_subdir,
         )
         return
 
@@ -168,6 +169,7 @@ def main():
             webcam_index=_resolve_webcam_index(cfg.camera.webcam_index),
             process_fps=cfg.camera.process_fps,
             samples=args.samples,
+            gallery_subdir=cfg.storage.gallery_subdir,
             model_name=cfg.recognition.model_name,
             execution_providers=cfg.recognition.execution_providers,
             det_size=cfg.recognition.det_size,

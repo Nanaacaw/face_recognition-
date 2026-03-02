@@ -8,11 +8,10 @@ from src.domain.events import Event
 
 @dataclass
 class SpgState:
-    def __init__(self):
-        self.state: str = "UNKNOWN"
-        self.last_seen_ts: Optional[float] = None
-        self.alert_active: bool = False
-        self.last_name: Optional[str] = None
+    state: str = "UNKNOWN"
+    last_seen_ts: Optional[float] = None
+    alert_active: bool = False
+    last_name: Optional[str] = None
 
 class PresenceEngine:
     def __init__(

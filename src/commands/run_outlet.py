@@ -351,7 +351,11 @@ def run_outlet(
     if os.path.exists(old_state): os.remove(old_state)
     
     try:
-        SnapshotCleaner(settings.storage.data_dir, settings.storage.snapshot_retention_days).clean()
+        SnapshotCleaner(
+            settings.storage.data_dir,
+            settings.storage.snapshot_retention_days,
+            sim_output_subdir=settings.storage.sim_output_subdir,
+        ).clean()
     except Exception:
         pass
 
@@ -501,6 +505,7 @@ def run_outlet(
             det_size=tuple(settings.recognition.det_size),
             threshold=settings.recognition.threshold,
             gallery_path=settings.storage.data_dir,
+            gallery_subdir=settings.storage.gallery_subdir,
             shared_buffers=shared_buffer_configs if use_shm else None,
             frame_skip=frame_skip_base,
             frame_skip_value=frame_skip_control,

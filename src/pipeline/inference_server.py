@@ -20,6 +20,7 @@ class InferenceServer:
         det_size: tuple,
         threshold: float,
         gallery_path: str,
+        gallery_subdir: str = "gallery",
         shared_buffers: dict | None = None,
         frame_skip: int = 0,
         frame_skip_value: Any | None = None,
@@ -48,6 +49,7 @@ class InferenceServer:
         self.det_size = det_size
         self.threshold = threshold
         self.gallery_path = gallery_path
+        self.gallery_subdir = gallery_subdir
         self.frame_skip = max(0, frame_skip)
         self.frame_skip_value = frame_skip_value
         self.min_det_score = max(0.0, float(min_det_score))
@@ -87,7 +89,7 @@ class InferenceServer:
             
             # 2. Load Gallery
             logger.info(f"[InferenceServer] Loading gallery from {self.gallery_path}...")
-            store = GalleryStore(self.gallery_path)
+            store = GalleryStore(self.gallery_path, gallery_subdir=self.gallery_subdir)
             gallery_data = store.load_all()
             
             self.matcher = Matcher(threshold=self.threshold)

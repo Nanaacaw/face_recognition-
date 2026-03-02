@@ -42,10 +42,11 @@ def run_webcam_recognition(
     preview_frame_save_interval_sec: float = 0.2,
     preview_frame_width: int = 640,
     preview_jpeg_quality: int = 80,
+    gallery_subdir: str = "gallery",
     **kwargs,
 ):
     actual_gallery_dir = gallery_dir if gallery_dir else data_dir
-    store = GalleryStore(actual_gallery_dir)
+    store = GalleryStore(actual_gallery_dir, gallery_subdir=gallery_subdir)
     gallery = store.load_all()
 
     event_store = EventStore(data_dir)
