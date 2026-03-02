@@ -16,7 +16,6 @@ SETTINGS = load_settings()
 DATA_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.sim_output_subdir)
 GALLERY_DIR = os.path.join(SETTINGS.storage.data_dir, SETTINGS.storage.gallery_subdir)
 HEALTH_PATH = os.path.join(DATA_DIR, "camera_health.json")
-RUNTIME_CONTROL_PATH = os.path.join(DATA_DIR, "runtime_control.json")
 
 if not os.path.exists(DATA_DIR):
     print(f"Warning: {DATA_DIR} does not exist yet. Dashboard might be empty.")
@@ -162,83 +161,6 @@ async def api_events():
 async def api_health():
     return get_health()
 
-
-@app.get("/api/runtime/control")
-async def api_runtime_control_get():
-    defaults = {
-        "frame_skip": 0,
-        "min_consecutive_hits": 1,
-        "min_det_score": 0.0,
-        "min_face_width_px": 0,
-        "auto_degrade_enabled": True,
-        "control_path": RUNTIME_CONTROL_PATH,
-    }
-    try:
-        if os.path.exists(RUNTIME_CONTROL_PATH):
-            with open(RUNTIME_CONTROL_PATH, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-                if isinstance(payload, dict):
-                    defaults.update(payload)
-    except Exception:
-        pass
-    return defaults
-
-
-@app.post("/api/runtime/control")
-async def api_runtime_control_set(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-    if not isinstance(payload, dict):
-        return {"success": False, "error": "Invalid payload."}
-
-    allowed_keys = {
-        "frame_skip",
-        "min_consecutive_hits",
-        "min_det_score",
-        "min_face_width_px",
-        "auto_degrade_enabled",
-    }
-    sanitized: dict[str, int | float | bool] = {}
-    for key in allowed_keys:
-        if key not in payload:
-            continue
-        value = payload[key]
-        try:
-            if key in {"frame_skip", "min_consecutive_hits", "min_face_width_px"}:
-                sanitized[key] = int(value)
-            elif key == "min_det_score":
-                sanitized[key] = float(value)
-            elif key == "auto_degrade_enabled":
-                sanitized[key] = bool(value)
-        except (TypeError, ValueError):
-            continue
-
-    if not sanitized:
-        return {"success": False, "error": "No valid control values."}
-
-    # Read existing controls, then merge.
-    current = {}
-    if os.path.exists(RUNTIME_CONTROL_PATH):
-        try:
-            with open(RUNTIME_CONTROL_PATH, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-                if isinstance(existing, dict):
-                    current = existing
-        except Exception:
-            current = {}
-    current.update(sanitized)
-
-    os.makedirs(os.path.dirname(RUNTIME_CONTROL_PATH), exist_ok=True)
-    with open(RUNTIME_CONTROL_PATH, "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=2)
-
-    return {
-        "success": True,
-        "message": "Runtime control updated.",
-        "control": current,
-    }
 
 @app.get("/api/snapshot/{spg_id}")
 async def api_snapshot(spg_id: str):

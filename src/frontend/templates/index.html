@@ -44,38 +44,6 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 mb-6">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex items-center gap-3">
-                    <span class="text-sm font-semibold text-gray-800">Runtime Tuning</span>
-                </div>
-            </div>
-            <div class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3">
-                <label class="text-xs text-gray-600">frame_skip
-                    <input type="number" min="0" x-model.number="runtimeControl.frame_skip" class="mt-1 w-full rounded border-gray-300 text-sm">
-                </label>
-                <label class="text-xs text-gray-600">min_hits
-                    <input type="number" min="1" x-model.number="runtimeControl.min_consecutive_hits" class="mt-1 w-full rounded border-gray-300 text-sm">
-                </label>
-                <label class="text-xs text-gray-600">min_det_score
-                    <input type="number" step="0.01" min="0" x-model.number="runtimeControl.min_det_score" class="mt-1 w-full rounded border-gray-300 text-sm">
-                </label>
-                <label class="text-xs text-gray-600">min_face_width_px
-                    <input type="number" min="0" x-model.number="runtimeControl.min_face_width_px" class="mt-1 w-full rounded border-gray-300 text-sm">
-                </label>
-                <label class="text-xs text-gray-600 flex items-end">
-                    <span class="mr-2">auto_degrade</span>
-                    <input type="checkbox" x-model="runtimeControl.auto_degrade_enabled" class="rounded border-gray-300">
-                </label>
-            </div>
-            <div class="mt-3">
-                <button @click="saveRuntimeControl()"
-                        class="px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                    Save Runtime Control
-                </button>
-            </div>
-        </div>
-
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
                 <div class="text-sm font-medium text-gray-500">Total Personnel</div>
@@ -296,18 +264,10 @@
                 lastUpdate: '-',
                 showCameras: false,
                 cameraModal: { open: false, cam: null },
-                runtimeControl: {
-                    frame_skip: 0,
-                    min_consecutive_hits: 1,
-                    min_det_score: 0.0,
-                    min_face_width_px: 0,
-                    auto_degrade_enabled: true
-                },
 
                 init() {
                     this.fetchData();
                     this.fetchCameras();
-                    this.fetchRuntimeControl();
                     setInterval(() => this.fetchData(), 2000);
                 },
 
@@ -341,38 +301,6 @@
                         }
                     } catch (e) {
                         console.error('Camera fetch error', e);
-                    }
-                },
-
-                async fetchRuntimeControl() {
-                    try {
-                        const res = await fetch('/api/runtime/control');
-                        const ctl = await res.json();
-                        this.runtimeControl.frame_skip = Number(ctl.frame_skip ?? 0);
-                        this.runtimeControl.min_consecutive_hits = Number(ctl.min_consecutive_hits ?? 1);
-                        this.runtimeControl.min_det_score = Number(ctl.min_det_score ?? 0);
-                        this.runtimeControl.min_face_width_px = Number(ctl.min_face_width_px ?? 0);
-                        this.runtimeControl.auto_degrade_enabled = Boolean(ctl.auto_degrade_enabled ?? true);
-                    } catch (e) {
-                        console.error('Runtime control fetch error', e);
-                    }
-                },
-
-                async saveRuntimeControl() {
-                    try {
-                        await fetch('/api/runtime/control', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                frame_skip: Number(this.runtimeControl.frame_skip || 0),
-                                min_consecutive_hits: Number(this.runtimeControl.min_consecutive_hits || 1),
-                                min_det_score: Number(this.runtimeControl.min_det_score || 0),
-                                min_face_width_px: Number(this.runtimeControl.min_face_width_px || 0),
-                                auto_degrade_enabled: Boolean(this.runtimeControl.auto_degrade_enabled),
-                            })
-                        });
-                    } catch (e) {
-                        console.error('Runtime control save error', e);
                     }
                 },
 
@@ -427,7 +355,7 @@
                     if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
                     return `${Number(value).toFixed(1)}s`;
                 },
-                
+
                 formatRelativeTime(ts) {
                     if (!ts) return '-';
                     const now = Date.now() / 1000;
