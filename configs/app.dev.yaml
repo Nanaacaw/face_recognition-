@@ -7,21 +7,23 @@ camera:
   preview: true
 
 target:
-  spg_ids: ["001", "002", "003", "004"]
+  spg_ids: ["001", "002", "003", "004", "005", "006"]
   outlet_id: "outlet_test"
   camera_id: "webcam_01"
 
 ## Shared Settings
 recognition:
-  threshold: 0.3
-  min_consecutive_hits: 2
-  model_name: "buffalo_s"
+  threshold: 0.30
+  min_consecutive_hits: 1
+  min_det_score: 0.3
+  min_face_width_px: 0
+  model_name: "buffalo_l"
   execution_providers: ["CUDAExecutionProvider", "CPUExecutionProvider"]
-  det_size: [640, 640]
+  det_size: [960, 960] # 640 | 960 | 1024 | 1280
 
 presence:
-  grace_seconds: 3 # dev: 3, production: 20
-  absent_seconds: 10 # dev: 10, production: 300 (5 min)
+  grace_seconds: 20 # dev: 3, production: 20
+  absent_seconds: 300 # dev: 10, production: 300 (5 min)
 
 storage:
   data_dir: "./data"
@@ -37,19 +39,23 @@ outlet:
   cameras:
     - id: "cam_01"
       rtsp_url: "${RTSP_CAM_01_URL}"
+      roi: [0.1719, 0.1792, 0.9781, 0.9722]
     - id: "cam_02"
       rtsp_url: "${RTSP_CAM_02_URL}"
+      roi: [0.0016, 0.0931, 0.9500, 0.9972] # Example: [0.20, 0.15, 0.85, 0.95]
     - id: "cam_03"
       rtsp_url: "${RTSP_CAM_03_URL}"
+      roi: [0.2203, 0.1778, 0.6438, 0.9861]
     - id: "cam_04"
       rtsp_url: "${RTSP_CAM_04_URL}"
-  target_spg_ids: ["001", "002", "003", "004"]
+      roi: [0.0094, 0.1250, 0.7297, 0.9500]
+  target_spg_ids: ["001", "002", "003", "004", "005", "006"]
 
 ## Inference Server (Centralized Mode)
 inference:
   frame_skip: 0
-  max_frame_height: 720
-  max_frame_width: 1280
+  max_frame_height: 1080
+  max_frame_width: 1920
 
 ## Notification
 notification:
@@ -74,15 +80,15 @@ runtime:
   supervisor_restart_cooldown_sec: 3.0
   supervisor_max_restarts_per_minute: 15
   auto_degrade_enabled: true
-  auto_degrade_lag_high_ms: 350
-  auto_degrade_lag_low_ms: 140
-  auto_degrade_high_streak: 12
-  auto_degrade_low_streak: 30
-  auto_degrade_max_frame_skip: 2
+  auto_degrade_lag_high_ms: 550
+  auto_degrade_lag_low_ms: 220
+  auto_degrade_high_streak: 25
+  auto_degrade_low_streak: 60
+  auto_degrade_max_frame_skip: 3
   preview_raw_enabled: false
   preview_frame_save_interval_sec: 0.1
-  preview_frame_width: 640
-  preview_jpeg_quality: 78
+  preview_frame_width: 960 # 1280 | 1920
+  preview_jpeg_quality: 80 # 78 | 90
 
 dashboard:
   host: "0.0.0.0"

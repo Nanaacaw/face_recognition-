@@ -1,48 +1,60 @@
-# SPG Attendance Monitoring System
+# SPG Attendance Monitoring (Face Recognition)
 
-Sistem pemantauan kehadiran SPG cerdas berbasis Face Recognition dengan dukungan Multi-Kamera, Real-time Dashboard, dan Notifikasi Telegram.
+Sistem monitoring kehadiran SPG berbasis face recognition untuk mode multi-kamera outlet, dengan dashboard realtime dan notifikasi Telegram.
+
+## Sistem Saat Ini
+
+- Pipeline utama: **multi-camera centralized inference** (`run_outlet`)
+- Dashboard FastAPI + UI monitoring + halaman **Manage SPG**
+- Dukungan mode:
+  - RTSP production/staging
+  - simulasi video lokal
+  - single webcam (debug/enroll/quick test)
+- Self-healing:
+  - restart worker/inference
+  - restart budget guard
+  - auto-degrade (`frame_skip`) saat lag tinggi
+
+## Arsitektur Ringkas
+
+```text
+Camera Workers (N) -> Inference Server (1) -> Main Loop (Aggregator + Supervisor)
+                                             -> JSON state/health/events + snapshots
+Dashboard (FastAPI) membaca output JSON/JPEG tersebut untuk UI realtime.
+```
 
 ## System Flow
 
 ```mermaid
 graph TD
-    subgraph "Edge Device (Store PC)"
-        Cam1[Camera 1] -->|RTSP| Worker1[Worker Process 1]
-        Cam2[Camera 2] -->|RTSP| Worker2[Worker Process 2]
-        CamN[Camera N] -->|RTSP| WorkerN[Worker Process N]
-        
-        subgraph "Data Pipeline"
-            Worker1 & Worker2 & WorkerN -->|Shared Memory| InfServer[Inference Server]
-            InfServer -->|Face Data| MainProc[Main Process]
-            
-            MainProc -->|Aggregated Events| DB[(Local JSON Storage)]
-            MainProc -->|Presence Logic| AlertSys[Alert System]
-        end
-        
-        DB --> Dashboard[Dashboard Server]
-    end
-    
-    subgraph "External"
-        AlertSys -->|Msg + Photo| Telegram[Telegram Bot]
-        Dashboard -->|Web UI| Browser[Supervisor Monitor]
-    end
+    Cam1[Camera Worker 1] --> InQ[input_queue]
+    Cam2[Camera Worker 2] --> InQ
+    CamN[Camera Worker N] --> InQ
+
+    SHM[(Shared Memory Buffers)] -. frame data .-> INF[Inference Server]
+    InQ --> INF
+    INF --> OutQ[output_queue]
+    OutQ --> MAIN[Main Loop / Supervisor]
+
+    MAIN --> AGG[Outlet Aggregator]
+    MAIN --> STATE[outlet_state.json]
+    MAIN --> HEALTH[camera_health.json]
+    MAIN --> EVENTS[events.jsonl]
+    MAIN --> SNAP[snapshots]
+    MAIN --> TG[Telegram Alert]
+
+    STATE --> DASH[Dashboard]
+    HEALTH --> DASH
+    EVENTS --> DASH
+    SNAP --> DASH
 ```
 
-## Key Features
-
-*   **Multi-Camera Support**: Menghubungkan banyak CCTV dalam satu outlet.
-*   **Centralized AI**: Satu model AI melayani semua kamera (Hemat Resource).
-*   **Real-time Dashboard**: Live view, status kehadiran, dan log event.
-*   **Smart Alerts**: Notifikasi Telegram saat SPG tidak terlihat (Absent) atau belum datang (Never Arrived).
-*   **Evidence**: Menyertakan foto snapshot saat alert dikirim.
-*   **Robustness**: Auto-reconnect RTSP, Auto-restart crash, & Auto-degrade saat lag.
-
-## Prerequisites
+## Prasyarat
 
 - Windows 10/11
-- Python 3.10+ (via Conda recommended)
-- CCTV Camera (RTSP) atau Webcam
-- NVIDIA GPU (Optional, recommended for `buffalo_l` model)
+- Python 3.10+ (disarankan via Conda)
+- Kamera RTSP atau webcam
+- GPU NVIDIA (opsional, direkomendasikan untuk model besar)
 
 ## Setup
 
@@ -52,40 +64,113 @@ conda activate face_recog
 copy .env.example .env
 ```
 
-Isi `.env` dengan kredensial kamera dan Telegram token Anda.
+Isi `.env` minimal:
 
-## Quick Start
+- `RTSP_CAM_01_URL` s.d. `RTSP_CAM_04_URL`
+- `SPG_TELEGRAM_BOT_TOKEN` dan `SPG_TELEGRAM_CHAT_ID` (opsional jika notifikasi aktif)
 
-Jalankan sistem dalam mode **Demo** (menggunakan config `configs/app.dev.yaml`):
+## Menjalankan Sistem
 
-**Terminal 1 (Pipeline):**
+### 1) Mode utama (multi-camera)
+
+Terminal 1 (pipeline):
+
 ```bash
 make run-demo
 ```
 
-**Terminal 2 (Dashboard):**
+Terminal 2 (dashboard):
+
 ```bash
 make dashboard-demo
 ```
 
-Buka browser di `http://localhost:8000`.
+Dashboard: `http://localhost:8000`
 
-## Configuration Guide
+### 2) Profil staging / production
 
-File konfigurasi utama ada di `configs/app.dev.yaml`. Beberapa setting penting:
+```bash
+make run-staging
+make dashboard-staging
 
-*   **Recognition**:
-    *   `model_name`: `buffalo_s` (Cepat) atau `buffalo_l` (Akurat).
-    *   `det_size`: Resolusi input deteksi (e.g., `[640, 640]`).
-*   **Performance**:
-    *   `process_fps`: Target FPS (e.g., `8` - `12`).
-    *   `frame_skip`: Skip frame untuk hemat CPU.
-*   **Presence**:
-    *   `absent_seconds`: Batas waktu sebelum dianggap Absent (e.g., `300` detik).
+make run-prod
+make dashboard-prod
+```
 
-## Documentation
+### 3) Simulasi video
 
-*   [System Spec](docs/00-spec.md)
-*   [Architecture](docs/02-architecture.md)
-*   [System Flow & Diagrams](docs/05-system-flow.md)
-*   [Config Reference](docs/03-config-reference.md)
+```bash
+make simulate
+make simulate-light
+```
+
+### 4) Tool single-camera
+
+```bash
+make webcam
+python -m src.app debug --config configs/app.dev.yaml
+python -m src.app enroll --spg_id 001 --name "Nana" --samples 30 --config configs/app.dev.yaml
+```
+
+## Konfigurasi
+
+Prioritas config:
+
+1. argumen `--config`
+2. env `APP_CONFIG_PATH`
+3. env `APP_ENV` -> `configs/app.<env>.yaml` (default `dev`)
+
+File profile:
+
+- `configs/app.dev.yaml`
+- `configs/app.staging.yaml`
+- `configs/app.prod.yaml`
+
+Referensi lengkap: [docs/03-config-reference.md](docs/03-config-reference.md)
+
+## Data Runtime yang Dihasilkan
+
+Basis path: `storage.data_dir`
+
+- `<data_dir>/<sim_output_subdir>/outlet_state.json`
+- `<data_dir>/<sim_output_subdir>/camera_health.json`
+- `<data_dir>/<sim_output_subdir>/cam_XX/events.jsonl`
+- `<data_dir>/<sim_output_subdir>/cam_XX/snapshots/latest_frame.jpg`
+- `<data_dir>/<gallery_subdir>/*.json` dan `*_last_face.jpg`
+- `<data_dir>/snapshots/*.jpg` (snapshot alert Telegram)
+
+## Runtime Control (Hot Tuning)
+
+Pipeline membaca file:
+
+- `<data_dir>/<sim_output_subdir>/runtime_control.json`
+
+Field yang didukung:
+
+- `frame_skip`
+- `min_consecutive_hits`
+- `min_det_score`
+- `min_face_width_px`
+- `auto_degrade_enabled`
+
+Contoh:
+
+```json
+{
+  "frame_skip": 1,
+  "min_consecutive_hits": 2,
+  "min_det_score": 0.55,
+  "min_face_width_px": 80,
+  "auto_degrade_enabled": true
+}
+```
+
+## Dokumentasi
+
+- [docs/00-spec.md](docs/00-spec.md)
+- [docs/01-mvp-checklist.md](docs/01-mvp-checklist.md)
+- [docs/02-architecture.md](docs/02-architecture.md)
+- [docs/03-config-reference.md](docs/03-config-reference.md)
+- [docs/03-dashboard.md](docs/03-dashboard.md)
+- [docs/04-enrollment-guidelines.md](docs/04-enrollment-guidelines.md)
+- [docs/05-system-flow.md](docs/05-system-flow.md)
